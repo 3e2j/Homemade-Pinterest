@@ -1,0 +1,7 @@
+{
+    "USER_ID": "UserID",
+    "HEADER_AUTHORIZATION": "Bearer AAA",
+    "HEADER_COOKIES": "Cookies",
+    "HEADER_CSRF": "Csrf",
+    "DOWNLOAD_IMAGES": true
+}

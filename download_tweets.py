@@ -1,0 +1,214 @@
+import json
+import requests
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+
+from tweet_parser import TweetParser
+
+CONFIG_FILE = Path("config.json")
+OUTPUT_DIR = Path("output")
+OUTPUT_FILE = OUTPUT_DIR / "liked_tweets.json"
+
+
+class TweetDownloader:
+    """
+    Downloads liked tweets for a user and saves them to a JSON file.
+    """
+
+    def __init__(self):
+        self._load_config()
+
+    def _load_config(self):
+        with open(CONFIG_FILE, encoding="utf8") as f:
+            config = json.load(f)
+        self.twitter_user_id = config.get('USER_ID')
+        self.header_authorization = config.get('HEADER_AUTHORIZATION')
+        self.header_cookie = config.get('HEADER_COOKIES')
+        self.header_csrf = config.get('HEADER_CSRF')
+
+    def retrieve_all_likes(self, consecutive_seen_limit: int = 50):
+        """
+        Fetches all liked tweets, deduplicates, and saves to OUTPUT_FILE.
+        """
+        existing_tweets = []
+        existing_tweet_map = {}
+        first_run = not Path(OUTPUT_FILE).exists()
+
+        if not first_run:
+            try:
+                with open(OUTPUT_FILE, 'r', encoding="utf8") as f:
+                    existing_tweets = json.load(f)
+                    existing_tweet_map = {t["tweet_id"]: t for t in existing_tweets}
+            except (json.JSONDecodeError, FileNotFoundError):
+                print("Invalid or missing JSON. Starting fresh.")
+                first_run = True
+
+        fetched_tweets = []
+        fetched_ids = set()
+        seen_streak = 0
+        cursor = None
+        old_cursor = None
+        current_page = 1
+
+        while True:
+            print(f"Fetching likes page {current_page}...")
+            page = self.retrieve_likes_page(cursor)
+            if not page:
+                break
+
+            for raw_tweet in page:
+                tweet_parser = TweetParser(raw_tweet)
+                if not tweet_parser.is_valid_tweet:
+                    continue
+
+                tweet = tweet_parser.tweet_as_json()
+                tweet_id = tweet["tweet_id"]
+
+                if tweet_id in existing_tweet_map:
+                    seen_streak += 1
+                    if seen_streak >= consecutive_seen_limit:
+                        print(f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping.")
+                        break
+                else:
+                    seen_streak = 0
+
+                fetched_ids.add(tweet_id)
+                fetched_tweets.append(tweet)
+
+            if seen_streak >= consecutive_seen_limit:
+                break
+
+            next_cursor = self.get_cursor(page)
+            if not next_cursor or next_cursor == old_cursor:
+                break
+
+            old_cursor = cursor
+            cursor = next_cursor
+            current_page += 1
+
+        if first_run:
+            with open(OUTPUT_FILE, 'w', encoding="utf8") as f:
+                json.dump(fetched_tweets, f, indent=2)
+            print(f"Fetched {len(fetched_tweets)} tweets on first run.")
+            return
+
+        # Merge and deduplicate
+        streak_start_index = next((i for i, t in enumerate(existing_tweets) if t["tweet_id"] in fetched_ids), None)
+        if streak_start_index is None:
+            merged = fetched_tweets + existing_tweets
+        else:
+            merged = fetched_tweets + existing_tweets[streak_start_index + 1:]
+
+        seen = set()
+        deduped = []
+        for t in merged:
+            tid = t["tweet_id"]
+            if tid not in seen:
+                seen.add(tid)
+                deduped.append(t)
+
+        with open(OUTPUT_FILE, 'w', encoding="utf8") as f:
+            json.dump(deduped, f, indent=2)
+
+        print(f"Fetched {len(fetched_tweets)} tweets.")
+        print(f"{len(deduped)} total saved tweets.")
+
+    def retrieve_likes_page(self, cursor: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+        """
+        Fetches a single page of likes.
+        """
+        likes_url = 'https://api.twitter.com/graphql/QK8AVO3RpcnbLPKXLAiVog/Likes'
+        variables_data_encoded = json.dumps(self.likes_request_variables_data(cursor=cursor))
+        features_data_encoded = json.dumps(self.likes_request_features_data())
+        try:
+            response = requests.get(
+                likes_url,
+                params={"variables": variables_data_encoded, "features": features_data_encoded},
+                headers=self.likes_request_headers(),
+                timeout=15
+            )
+            response.raise_for_status()
+            return self.extract_likes_entries(response.json())
+        except Exception as e:
+            print(f"Failed to fetch likes page: {e}")
+            return None
+
+    def extract_likes_entries(self, raw_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+        try:
+            return raw_data['data']['user']['result']['timeline_v2']['timeline']['instructions'][0]['entries']
+        except (KeyError, IndexError, TypeError):
+            print("Failed to extract likes entries from response.")
+            return None
+
+    def get_cursor(self, page_json: List[Dict[str, Any]]) -> Optional[str]:
+        try:
+            return page_json[-1]['content']['value']
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    def likes_request_variables_data(self, cursor: Optional[str] = None) -> Dict[str, Any]:
+        variables_data = {
+            "userId": self.twitter_user_id,
+            "count": 100,
+            "includePromotedContent": False,
+            "withSuperFollowsUserFields": False,
+            "withDownvotePerspective": False,
+            "withReactionsMetadata": False,
+            "withReactionsPerspective": False,
+            "withSuperFollowsTweetFields": False,
+            "withClientEventToken": False,
+            "withBirdwatchNotes": False,
+            "withVoice": False,
+            "withV2Timeline": True
+        }
+        if cursor:
+            variables_data["cursor"] = cursor
+        return variables_data
+
+    def likes_request_headers(self) -> Dict[str, str]:
+        return {
+            'Content-Type': 'application/json',
+            'Accept': '*/*',
+            'Authorization': self.header_authorization,
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Host': 'api.twitter.com',
+            'Origin': 'https://twitter.com',
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
+            'Referer': 'https://twitter.com/',
+            'Connection': 'keep-alive',
+            'Cookie': self.header_cookie,
+            'x-twitter-active-user': 'yes',
+            'x-twitter-client-language': 'en',
+            'x-csrf-token': self.header_csrf,
+            'x-twitter-auth-type': 'OAuth2Session'
+        }
+
+    def likes_request_features_data(self) -> Dict[str, Any]:
+        return {
+            "responsive_web_twitter_blue_verified_badge_is_enabled": True,
+            "verified_phone_label_enabled": False,
+            "responsive_web_graphql_timeline_navigation_enabled": True,
+            "view_counts_public_visibility_enabled": True,
+            "view_counts_everywhere_api_enabled": True,
+            "longform_notetweets_consumption_enabled": False,
+            "tweetypie_unmention_optimization_enabled": True,
+            "responsive_web_uc_gql_enabled": True,
+            "vibe_api_enabled": True,
+            "responsive_web_edit_tweet_api_enabled": True,
+            "graphql_is_translatable_rweb_tweet_is_translatable_enabled": True,
+            "standardized_nudges_misinfo": True,
+            "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": False,
+            "interactive_text_enabled": True,
+            "responsive_web_text_conversations_enabled": False,
+            "responsive_web_enhance_cards_enabled": False
+        }
+
+
+def main():
+    downloader = TweetDownloader()
+    print(f'Starting retrieval of likes for Twitter user {downloader.twitter_user_id}...')
+    downloader.retrieve_all_likes()
+    print(f'Done. Likes JSON saved to: {OUTPUT_FILE}')
+
+if __name__ == "__main__":
+    main()
