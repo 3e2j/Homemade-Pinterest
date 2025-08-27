@@ -187,6 +187,9 @@ def process_tweets(tweets):
 
     for idx, tweet in enumerate(tweets):
         media_urls = tweet.get("tweet_media_urls", [])[:4]  # limit to 4 media per tweet
+        # Skip tweets that have no media at all
+        if not media_urls:
+            continue
         avatar_url = tweet.get("user_avatar_url", "")
 
         # Prepare download list (avatar + media)
