@@ -13,49 +13,52 @@ You can choose to download all images, caching them locally - or receive them di
 - **Automatic media download:** Saves tweet images and user avatars for offline access.
 - **Privacy blur:** For detected sensitive media.
 
-## Important Information
-- Never share your credentials with anyone. Your credentials are only used to authenticate with Twitter, and are never sent elsewhere. 
-
-- It is recommended to leave the `DOWNLOAD_IMAGES` flag to true to avoid rate-limit restrictions by Twitter/X.
-
-- All downloaded images are converted to webp format to reduce disk space usage.
-
-- After a first run, the app will not update any data until the "Refresh" button is clicked. It is recommended to use this feature sparingly to avoid Twitter/X rate limitations.
+## Important Notes
+- Never share your credentials. They are only used to authenticate to Twitter / X.
+- Leaving `DOWNLOAD_IMAGES` set to `true` reduces repeated remote fetches and lowers rate‑limit risk.
+- Images are converted to WebP to save space.
+- Data (tweets + media) updates only when you click the Refresh button. It is recommended to use this feature sparingly to avoid Twitter/X rate limitations
 
 ## Setup
 
 ### 1. Install Requirements
-
-This project requires Python 3.7+ and the `requests` library.
-
+Python 3.9+ is recommended.
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Configure Access
+### 2. Configure Credentials
+Edit `config.json`:
 
-To import images from your Twitter likes, you need to provide credentials so the script can access your account data. Modify `config.json` and fill in the required fields:
-
+- `USER_ID`
 - `HEADER_AUTHORIZATION`
 - `HEADER_COOKIES`
 - `HEADER_CSRF`
-- `USER_ID`
-- `DOWNLOAD_IMAGES` (default set to `true`)
+- `DOWNLOAD_IMAGES` (boolean)
 
-**How to get your Twitter/X credentials:**
+How to obtain them:
+1. Open Twitter / X in a desktop browser and go to your Likes page.
+2. Open DevTools (F12), Network tab.
+3. Filter for requests containing `/Likes`.
+4. Select a request to `https://x.com/i/api/.../Likes`.
+5. Copy headers:
+   - `authorization`
+   - `x-csrf-token`
+   - full `cookie` string
+6. Find your numeric `userId` in the request payload or URL.
+7. Paste into `config.json`.  
+   If your cookie string contains double quotes, escape them with a backslash (`\"`).
 
-1. Open your browser and go to your Twitter Likes page.
-2. Open Developer Tools (`F12` or `Ctrl+Shift+I`), go to the Network tab.
-3. Find a request to `x.com/i/api/...` ending in `/Likes`.
-4. Copy the `Authorization`, `Cookies`, and `x-csrf-token` values from the request headers.
+### 3. Run
+Launch the server:
+```bash
+python gallery_server.py
+```
+A browser tab will open at:
+```
+http://localhost:8000/index.html
+```
+Click Refresh to fetch new likes and (optionally) download new media.
 
-    Note that while pasting cookie value, you would need to escape any existing double quotes by prefixing them with a backslash `\`
-
-5. Find your numeric Twitter `userId` in the request payload or URL.
-6. Paste these values into your `config.json`.
-
-### 3. Run the program
-
-Run `start.sh` or `gallery_server.py` and a tab should open at `http://localhost:8000/index.html`
-
-It will automatically start downloading tweet content.
+## Disclaimer
+Use responsibly and only for personal archival / viewing of your own liked content.
