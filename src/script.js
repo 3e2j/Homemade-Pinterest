@@ -2,7 +2,7 @@
 const BATCH_SIZE = 100;
 const MEDIA_DIR = "images/media";
 const AVATAR_DIR = "images/avatars";
-const DATA_FILE = "data.json";
+const DATA_FILE = "data.json";  // keep name
 const STYLE_FILE = "style.css";
 const WS_PORT = 8765;
 const MEDIA_MARGIN = 10;
@@ -71,7 +71,7 @@ async function createCard(tweet) {
   const hasMultipleMedia = tweet.media.length > 1;
   const isSensitive = tweet.possibly_sensitive;
   card.className = "card" + (hasMultipleMedia ? " multiple-media" : "");
-  card.dataset.tweetId = tweet.id;
+  card.dataset.tweetId = tweet.id || tweet.tweet_id;
 
   // Info section
   const link = document.createElement("a");
@@ -257,42 +257,58 @@ async function createCard(tweet) {
 }
 
 // ==== Tweet Loading and Lazy Load ====
-async function loadMoreTweets() {
+// Common insertion & reveal logic used by both append and prepend operations
+async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
+  if (!tweetsToInsert || !tweetsToInsert.length) return [];
   const grid = document.getElementById("grid");
-  const end = Math.min(loadedCount + BATCH_SIZE, tweets.length);
-  const fragment = document.createDocumentFragment();
-  const newCards = [];
+  if (!grid) return [];
 
-  for (let i = loadedCount; i < end; i++) {
-    const card = await createCard(tweets[i]);
-    card.style.visibility = "hidden";
-    fragment.appendChild(card);
-    newCards.push(card);
+  const fragment = document.createDocumentFragment();
+  const cards = [];
+
+  // For prepend we build in natural order but will insert reversed to keep visual order
+  if (prepend) {
+    for (const t of tweetsToInsert) {
+      const card = await createCard(t);
+      card.style.visibility = "hidden";
+      cards.push(card);
+    }
+    // Insert in reverse so first tweet becomes first DOM child
+    for (let i = cards.length - 1; i >= 0; i--) {
+      grid.insertBefore(cards[i], grid.firstChild);
+    }
+  } else {
+    for (const t of tweetsToInsert) {
+      const card = await createCard(t);
+      card.style.visibility = "hidden";
+      fragment.appendChild(card);
+      cards.push(card);
+    }
+    grid.appendChild(fragment);
   }
 
-  grid.appendChild(fragment);
-  loadedCount = end;
-
-  const images = newCards.flatMap(card => Array.from(card.querySelectorAll("img")));
+  const images = cards.flatMap(card => Array.from(card.querySelectorAll("img")));
   const reveal = () => {
     requestAnimationFrame(() => {
       layoutMasonry(grid);
-      newCards.forEach(card => {
-        card.style.visibility = "visible"; // Show after layout
-      });
+      cards.forEach(card => { card.style.visibility = "visible"; });
     });
   };
-  if (images.length === 0) {
+  if (!images.length) {
     reveal();
   } else {
-    let loadedImages = 0;
-    const check = () => {
-      if (++loadedImages === images.length) {
-        reveal();
-      }
-    };
-    images.forEach(img => img.complete ? check() : (img.onload = img.onerror = check));
+    let done = 0;
+    const check = () => { if (++done === images.length) reveal(); };
+    images.forEach(img => (img.complete ? check() : (img.onload = img.onerror = check)));
   }
+  return cards;
+}
+
+async function loadMoreTweets() {
+  const end = Math.min(loadedCount + BATCH_SIZE, tweets.length);
+  const slice = tweets.slice(loadedCount, end);
+  await insertTweets(slice, { prepend: false });
+  loadedCount = end;
 }
 
 function setupLazyLoad() {
@@ -340,25 +356,40 @@ function setupWebSocketPing() {
   });
 }
 
+// ==== Fetch Tweets Data ====
+async function fetchTweetsData() {
+  const url = `${DATA_FILE}?_=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error("Failed to load data.json");
+  return res.json();
+}
+
+// ==== Prepend Newly Fetched Tweets ====
+async function prependNewTweets(newTweets) {
+  if (!newTweets || !newTweets.length) return;
+  await insertTweets(newTweets, { prepend: true });
+  // Adjust loadedCount so infinite scroll continues after the currently rendered set
+  loadedCount += newTweets.length;
+}
+
 // ==== Event Listeners ====
 window.addEventListener("resize", () => layoutMasonry(document.getElementById("grid")));
 
 window.addEventListener("DOMContentLoaded", async () => {
   try {
-    const res = await fetch(DATA_FILE);
-    if (!res.ok) throw new Error("File not found"); // handle 404
-    tweets = await res.json();
+    tweets = await fetchTweetsData();
   } catch (e) {
-    console.warn(`${DATA_FILE} missing or unreadable, refreshing...`, e);
+    console.warn("data.json missing/unreadable, attempting refresh...", e);
   }
 
   if (!tweets.length) {
     try {
       await fetch("/refresh", { method: "POST" });
-      location.reload();
+      tweets = await fetchTweetsData(); // re-fetch fresh
     } catch (e) {
       console.error("Failed to refresh tweets:", e);
-      document.getElementById("grid").innerHTML = "<p>Error loading tweets. Please try again later.</p>";
+      const grid = document.getElementById("grid");
+      if (grid) grid.innerHTML = "<p>Error loading tweets. Please try again later.</p>";
       return;
     }
   }
@@ -374,11 +405,51 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
   try {
     const res = await fetch("/refresh", { method: "POST" });
     const data = await res.json();
-    if (data.new_found) {
-      location.reload();
+    if (data.updated) {
+      try {
+        const fresh = await fetchTweetsData();
+        const existingIds = new Set(tweets.map(t => t.id || t.tweet_id));
+        const freshIds = new Set(fresh.map(t => t.id || t.tweet_id));
+        const newOnes = fresh.filter(t => !existingIds.has(t.id || t.tweet_id));
+        const removedIds = [...existingIds].filter(id => !freshIds.has(id));
+
+        // Remove deleted tweets' cards
+        if (removedIds.length) {
+          const grid = document.getElementById("grid");
+          removedIds.forEach(id => {
+            const el = grid.querySelector(`.card[data-tweet-id="${id}"]`);
+            if (el) el.remove();
+          });
+        }
+
+        tweets = fresh; // replace full list
+
+        if (newOnes.length) {
+          await prependNewTweets(newOnes);
+        } else if (removedIds.length) {
+          // Re-layout after removals only
+            const grid = document.getElementById("grid");
+            layoutMasonry(grid);
+        }
+
+        // Recompute loadedCount based on number of cards currently rendered
+        const grid = document.getElementById("grid");
+        loadedCount = grid ? grid.children.length : tweets.length;
+
+        if (newOnes.length || removedIds.length) {
+          btn.textContent = "Updated";
+          setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 1500);
+        } else {
+          btn.textContent = "No changes";
+          setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 1500);
+        }
+      } catch (e) {
+        console.error("Failed to fetch updated data.json:", e);
+        location.reload(); // fallback
+      }
     } else {
-      btn.textContent = "No new tweets";
-      setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 2000);
+      btn.textContent = "No changes";
+      setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 1500);
     }
   } catch (e) {
     btn.textContent = "Error!";

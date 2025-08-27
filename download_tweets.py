@@ -30,21 +30,23 @@ class TweetDownloader:
         """
         Fetches all liked tweets, deduplicates, and saves to OUTPUT_FILE.
         """
-        existing_tweets = []
-        existing_tweet_map = {}
+        existing_tweets: list[dict] = []
+        existing_tweet_map: dict[str, dict] = {}
         first_run = not Path(OUTPUT_FILE).exists()
+        existing_ids_before: set[str] = set()
 
         if not first_run:
             try:
                 with open(OUTPUT_FILE, 'r', encoding="utf8") as f:
                     existing_tweets = json.load(f)
-                    existing_tweet_map = {t["tweet_id"]: t for t in existing_tweets}
+                    existing_tweet_map = {t["tweet_id"]: t for t in existing_tweets if t.get("tweet_id")}
+                    existing_ids_before = set(existing_tweet_map.keys())
             except (json.JSONDecodeError, FileNotFoundError):
                 print("Invalid or missing JSON. Starting fresh.")
                 first_run = True
 
-        fetched_tweets = []
-        fetched_ids = set()
+        fetched_tweets: list[dict] = []
+        fetched_ids: set[str] = set()
         seen_streak = 0
         cursor = None
         old_cursor = None
@@ -89,7 +91,8 @@ class TweetDownloader:
         if first_run:
             with open(OUTPUT_FILE, 'w', encoding="utf8") as f:
                 json.dump(fetched_tweets, f, indent=2)
-            print(f"Fetched {len(fetched_tweets)} tweets on first run.")
+            print(f"New tweets: {len(fetched_tweets)}")
+            print(f"Total saved tweets: {len(fetched_tweets)}")
             return
 
         # Merge and deduplicate
@@ -99,8 +102,8 @@ class TweetDownloader:
         else:
             merged = fetched_tweets + existing_tweets[streak_start_index + 1:]
 
-        seen = set()
-        deduped = []
+        seen: set[str] = set()
+        deduped: list[dict] = []
         for t in merged:
             tid = t["tweet_id"]
             if tid not in seen:
@@ -110,8 +113,14 @@ class TweetDownloader:
         with open(OUTPUT_FILE, 'w', encoding="utf8") as f:
             json.dump(deduped, f, indent=2)
 
-        print(f"Fetched {len(fetched_tweets)} tweets.")
-        print(f"{len(deduped)} total saved tweets.")
+        final_ids = {t["tweet_id"] for t in deduped}
+        new_ids = final_ids - existing_ids_before
+        removed_ids = existing_ids_before - final_ids
+        if len(new_ids) > 0:
+            print(f"New tweets: {len(new_ids)}")
+        if len(removed_ids) > 0:
+            print(f"Tweets removed: {len(removed_ids)}")
+        print(f"Total saved tweets: {len(deduped)}")
 
     def retrieve_likes_page(self, cursor: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
         """

@@ -6,7 +6,6 @@
   <title>Homemade Pinterest</title>
 
   <script>
-    window.__version = new Date().toISOString().replace(/[-:.TZ]/g, "");
     document.write(`<link rel="stylesheet" href="style.css" />`);
   </script>
 </head>
@@ -15,7 +14,7 @@
   <div id="grid"></div>
 
   <script>
-    document.write(`<script src="script.js?v=${window.__version}" defer><\/script>`);
+    document.write(`<script src="script.js" defer><\/script>`);
   </script>
 </body>
 </html>

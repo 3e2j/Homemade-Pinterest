@@ -6,85 +6,197 @@ import asyncio
 import socketserver
 import webbrowser
 import websockets
+import json
+import logging
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler
-import json
+from urllib.parse import urlparse, unquote
 
 import download_tweets
-import parse_media
+import parse_media  # adjust if your media script has a different name
+import hashlib
+
+# ==== Logging ====
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+LOG = logging.getLogger("gallery_server")
 
 # ==== Constants ====
 PORT = 8000
 WS_PORT = 8765
-CLIENT_TIMEOUT = 10  # seconds of client inactivity before shutdown
-SHUTDOWN_WAIT = 1    # seconds to wait after last client disconnect before shutdown
-SOURCE_DIR = Path("output")
-LIKED_TWEETS_FILE = SOURCE_DIR / "liked_tweets.json"
+CLIENT_TIMEOUT = 10
+SHUTDOWN_WAIT = 1
 
-clients = {}
+STATIC_DIR = Path("src")
+OUTPUT_DIR = Path("output")
+LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
+DATA_FILE = OUTPUT_DIR / "data.json"
+IMAGES_DIR = OUTPUT_DIR / "images"
+
+clients: dict = {}
+
+# ==== File Change Detection ====
+def file_fingerprint(path: Path):
+    try:
+        stat = path.stat()
+        with open(path, 'rb') as f:
+            data = f.read()
+        return (stat.st_mtime_ns, stat.st_size, hashlib.md5(data).hexdigest())
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        LOG.error("fingerprint error for %s: %s", path, e)
+        return None
+
+# ==== Helper ====
+def safe_path(root: Path, rel: str) -> Path | None:
+    try:
+        candidate = (root / rel).resolve()
+        root_resolved = root.resolve()
+        if root_resolved in candidate.parents or candidate == root_resolved:
+            if candidate.exists():
+                return candidate
+    except Exception as e:
+        LOG.error("safe_path error (%s / %s): %s", root, rel, e)
+    return None
 
 # ==== HTTP Handler ====
 class GalleryRequestHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(SOURCE_DIR), **kwargs)
-
-    def send_response(self, code, message=None):
+    def translate_path(self, path: str) -> str:
         try:
-            super().send_response(code, message)
-        except BrokenPipeError:
-            self.close_connection = True
+            parsed = urlparse(path)
+            req_path = unquote(parsed.path.lstrip("/"))
 
-    def send_header(self, keyword, value):
-        try:
-            super().send_header(keyword, value)
-        except BrokenPipeError:
-            self.close_connection = True
+            if req_path == "" or req_path == "index.html":
+                return str(STATIC_DIR / "index.html")
 
-    def end_headers(self):
-        try:
-            super().end_headers()
-        except BrokenPipeError:
-            self.close_connection = True
+            static_hit = safe_path(STATIC_DIR, req_path)
+            if static_hit:
+                return str(static_hit)
 
-    def copyfile(self, source, outputfile):
-        try:
-            shutil.copyfileobj(source, outputfile)
-        except (BrokenPipeError, Exception):
-            self.close_connection = True
+            output_hit = safe_path(OUTPUT_DIR, req_path)
+            if output_hit:
+                return str(output_hit)
+
+            if req_path == "data.json":
+                return str(DATA_FILE)
+
+            return str(STATIC_DIR / "index.html")
+        except Exception as e:
+            LOG.error("translate_path failure for %s: %s", path, e)
+            return str(STATIC_DIR / "index.html")
+
+    # Only suppress routine 200 GET noise; keep errors.
+    def log_message(self, fmt, *args):
+        message = fmt % args
+        if " 200 " in message and "GET" in message:
+            LOG.debug(message)
+        else:
+            # Log non-200 or non-GET at info (errors surfaced elsewhere too)
+            if any(code in message for code in (" 404 ", " 500 ")):
+                LOG.warning(message)
+            else:
+                LOG.info(message)
 
     def do_POST(self):
-        if self.path == "/refresh":
-            # Run download_tweets and check if new tweets were added
-            tweets_before = self.get_tweet_ids()
-            updated = download_tweets.main()  # Should return True if liked_tweets.json was updated
-            tweets_after = self.get_tweet_ids()
-            new_tweet_ids = tweets_after - tweets_before
+        if self.path != "/refresh":
+            self.send_error(404, "Unsupported POST endpoint")
+            return
 
+        try:
+            before_ids = self._get_tweet_ids()
+            before_fp = file_fingerprint(LIKED_TWEETS_FILE)
+            download_tweets.main()  # may or may not add new tweets
+            after_fp = file_fingerprint(LIKED_TWEETS_FILE)
+            file_updated = before_fp != after_fp
+            after_ids = self._get_tweet_ids()
+            new_ids = after_ids - before_ids
             new_tweets = []
-            if new_tweet_ids:
-                # Only run parse_media if there are new tweets
-                parse_media.main()
-                # Load new tweets to send to client
-                with open(LIKED_TWEETS_FILE, encoding="utf8") as f:
-                    all_tweets = json.load(f)
-                    new_tweets = [t for t in all_tweets if t.get("tweet_id") in new_tweet_ids]
+            if file_updated:
+                # Always (re)process media if file changed (additions or removals)
+                if new_ids:
+                    LOG.info("Found %d new tweet(s); processing media...", len(new_ids))
+                else:
+                    LOG.info("Tweets file changed (no new tweets, likely removals); re-processing media...")
+                try:
+                    parse_media.main()
+                except Exception as e:
+                    LOG.error("Media parsing failed: %s", e)
+                # Only compile list of new tweet objects if there were additions
+                if new_ids:
+                    try:
+                        with open(LIKED_TWEETS_FILE, encoding="utf8") as f:
+                            all_tweets = json.load(f)
+                        new_tweets = [t for t in all_tweets if t.get("tweet_id") in new_ids]
+                    except Exception as e:
+                        LOG.error("Failed loading new tweets after media parse: %s", e)
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({
-                "new_found": bool(new_tweet_ids),
-                "new_tweets": new_tweets
+                "new_found": bool(new_ids),
+                "new_tweets": new_tweets,
+                "updated": bool(file_updated),
+                "new_count": len(new_tweets)
             }).encode())
-        else:
-            self.send_error(404)
+        except Exception as e:
+            LOG.exception("Unhandled error in /refresh")
+            try:
+                self.send_response(500)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "internal", "detail": str(e)}).encode())
+            except Exception:
+                pass  # socket already broken
 
-    def get_tweet_ids(self):
+    def _get_tweet_ids(self) -> set[str]:
         try:
             with open(LIKED_TWEETS_FILE, encoding="utf8") as f:
-                return set(t.get("tweet_id") for t in json.load(f) if t.get("tweet_id"))
-        except Exception:
+                return {t.get("tweet_id") for t in json.load(f) if t.get("tweet_id")}
+        except FileNotFoundError:
             return set()
+        except Exception as e:
+            LOG.error("Failed reading tweet IDs: %s", e)
+            return set()
+
+    # Harden against broken pipes
+    def send_response(self, code, message=None):
+        try:
+            super().send_response(code, message)
+        except BrokenPipeError:
+            LOG.warning("BrokenPipe while sending response header")
+            self.close_connection = True
+
+    def send_header(self, key, value):
+        try:
+            super().send_header(key, value)
+        except BrokenPipeError:
+            LOG.debug("BrokenPipe while sending header %s", key)
+            self.close_connection = True
+
+    def end_headers(self):
+        if self.path.startswith("/data.json"):
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        try:
+            super().end_headers()
+        except BrokenPipeError:
+            LOG.debug("BrokenPipe in end_headers")
+            self.close_connection = True
+
+    def copyfile(self, source, outputfile):
+        try:
+            shutil.copyfileobj(source, outputfile)
+        except BrokenPipeError:
+            LOG.debug("BrokenPipe during body copy")
+            self.close_connection = True
+        except Exception as e:
+            LOG.error("copyfile error: %s", e)
+            self.close_connection = True
 
 # ==== Threaded HTTP Server ====
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
@@ -92,22 +204,26 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 
 def start_http_server():
     with ThreadedHTTPServer(("0.0.0.0", PORT), GalleryRequestHandler) as httpd:
-        print(f"[HTTP] Serving at http://0.0.0.0:{PORT}")
-        webbrowser.open(f"http://localhost:{PORT}/index.html")
+        LOG.info("[HTTP] Serving at http://localhost:%d", PORT)
+        if (STATIC_DIR / "index.html").exists():
+            try:
+                webbrowser.open(f"http://localhost:{PORT}/")
+            except Exception as e:
+                LOG.debug("Browser open failed: %s", e)
         httpd.serve_forever()
 
 # ==== WebSocket Client Monitoring ====
 async def check_clients():
     now = time.time()
-    inactive = [ws for ws, last_seen in clients.items() if now - last_seen > CLIENT_TIMEOUT]
-    for ws in inactive:
-        print("[Monitor] Removing inactive client")
+    stale = [ws for ws, last in clients.items() if now - last > CLIENT_TIMEOUT]
+    for ws in stale:
         clients.pop(ws, None)
+        LOG.info("Removed inactive client")
     if not clients:
-        print("[Monitor] No active clients. Waiting before shutdown...")
+        LOG.info("No active clients. Waiting %ss before shutdown...", SHUTDOWN_WAIT)
         await asyncio.sleep(SHUTDOWN_WAIT)
         if not clients:
-            print("[Monitor] Still no active clients after wait. Shutting down.")
+            LOG.info("Shutting down (no clients).")
             os._exit(0)
 
 async def monitor_clients():
@@ -116,31 +232,36 @@ async def monitor_clients():
         await check_clients()
 
 async def ws_handler(websocket):
-    print("[WebSocket] Client connected")
+    LOG.info("[WebSocket] Client connected")
     clients[websocket] = time.time()
     try:
-        async for message in websocket:
-            if message == "ping":
+        async for msg in websocket:
+            if msg == "ping":
                 clients[websocket] = time.time()
-            elif message == "close":
-                print("[WebSocket] Received close signal from client.")
+            elif msg == "close":
+                LOG.info("[WebSocket] Client requested close")
                 break
     except websockets.ConnectionClosed:
-        print("[WebSocket] Client disconnected")
+        LOG.info("[WebSocket] Client disconnected")
+    except Exception as e:
+        LOG.error("WebSocket error: %s", e)
     finally:
         clients.pop(websocket, None)
         await check_clients()
 
-async def start_websocket_server():
-    print(f"[WebSocket] Serving at ws://0.0.0.0:{WS_PORT}")
+async def start_ws():
+    LOG.info("[WebSocket] ws://localhost:%d", WS_PORT)
     async with websockets.serve(ws_handler, "0.0.0.0", WS_PORT):
         await monitor_clients()
 
-# ==== Main Entrypoint ====
 def main():
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     http_thread = threading.Thread(target=start_http_server, daemon=True)
     http_thread.start()
-    asyncio.run(start_websocket_server())
+    try:
+        asyncio.run(start_ws())
+    except KeyboardInterrupt:
+        LOG.info("Interrupted. Exiting.")
 
 if __name__ == "__main__":
     main()
