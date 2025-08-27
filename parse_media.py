@@ -78,10 +78,11 @@ def save_hash_cache(hash_map):
     save_json_file(MEDIA_HASH_CACHE, hash_map)
 
 def load_duplicate_urls():
-    return set(load_json_file(DUPLICATE_URLS_FILE, []))
+    data = load_json_file(DUPLICATE_URLS_FILE, {})
+    return data if isinstance(data, dict) else {}
 
-def save_duplicate_urls(urls):
-    save_json_file(DUPLICATE_URLS_FILE, list(urls))
+def save_duplicate_urls(url_map):
+    save_json_file(DUPLICATE_URLS_FILE, url_map)
 
 def recompute_hashes_and_remove_duplicates():
     if not DOWNLOAD_IMAGES:
@@ -120,8 +121,11 @@ def recompute_hashes_and_remove_duplicates():
 
 # --- Media Downloading (Threaded) ---
 def download_single_file(url, folder, convert=True, hash_cache=None, known_duplicates=None):
-    if not url or (known_duplicates and url in known_duplicates):
+    if not url:
         return None
+    if isinstance(known_duplicates, dict) and url in known_duplicates and known_duplicates[url]:
+        # Already known duplicate; return canonical filename
+        return known_duplicates[url]
 
     ext = Path(urlparse(url).path).suffix
     hashed_name = md5(url.encode()).hexdigest()
@@ -149,9 +153,10 @@ def download_single_file(url, folder, convert=True, hash_cache=None, known_dupli
         if file_hash in hash_cache:
             try:
                 final_path.unlink()
-                if known_duplicates is not None:
-                    known_duplicates.add(url)
-                return hash_cache[file_hash]
+                existing_name = hash_cache[file_hash]
+                if isinstance(known_duplicates, dict):
+                    known_duplicates[url] = existing_name
+                return existing_name
             except Exception as e:
                 print(f"[Duplicate] Failed to remove {final_path.name}: {e}")
         else:
