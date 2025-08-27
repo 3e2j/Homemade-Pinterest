@@ -20,7 +20,6 @@ class TweetParser():
             "user_avatar_url": self.user_avatar_url,
             "tweet_content": self.tweet_content,
             "tweet_media_urls": self.media_urls,
-            "tweet_created_at": self.tweet_created_at,
             "possibly_sensitive": self.possibly_sensitive
         }
 
@@ -31,10 +30,6 @@ class TweetParser():
     @property
     def tweet_content(self):
         return self.key_data["legacy"]["full_text"]
-
-    @property
-    def tweet_created_at(self):
-        return self.key_data["legacy"]["created_at"]
 
     @property
     def user_handle(self):
