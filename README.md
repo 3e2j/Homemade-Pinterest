@@ -5,7 +5,7 @@ The app obtains your liked tweets, and allows you to browse them in a grid-view.
 
 You can choose to download all images, caching them locally - or receive them directly from Twitter/X's API.
 
-<!-- TODO ![example output rendered html of image grid](example_html_output.png) -->
+![Homemade Pinterest example](https://imgur.com/1VrhPjn.png)
 
 ## Features
 
