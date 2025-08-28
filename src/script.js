@@ -7,6 +7,13 @@ const STYLE_FILE = "style.css";
 const WS_PORT = 8765;
 const MEDIA_MARGIN = 10;
 const HALF_MARGIN = MEDIA_MARGIN / 2;
+// Layout / timing constants
+const CARD_WIDTH = 220;
+const COLUMN_GUTTER = 8;
+const SCROLL_ROOT_MARGIN = "1000px";
+const WS_PING_INTERVAL_MS = 5000;
+const SAME_ASPECT_TOLERANCE = 0.01;
+const WIDE_IMAGE_THRESHOLD = 1.2;
 
 // ==== State ====
 let tweets = [];
@@ -29,8 +36,8 @@ function getAvatarSrc(avatar) {
 
 // ==== Masonry Layout ====
 function layoutMasonry(container) {
-  const cardWidth = 220;
-  const gutter = 8;
+  const cardWidth = CARD_WIDTH;
+  const gutter = COLUMN_GUTTER;
   const columns = Math.floor(container.clientWidth / (cardWidth + gutter));
   if (columns < 1) return;
 
@@ -175,7 +182,6 @@ async function createCard(tweet) {
         const anyUnblurred = [...card.querySelectorAll(".media-wrap img")].some(i => !i.classList.contains("blurred"));
         if (anyUnblurred && hideBtn) hideBtn.style.display = "block";
       });
-
       card.addEventListener("mouseleave", () => {
         if (hideBtn) hideBtn.style.display = "none";
       });
@@ -199,7 +205,7 @@ async function createCard(tweet) {
 
     const validRatios = imageRatios.filter(r => r !== null);
     const firstRatio = validRatios[0];
-    allSameAspectRatio = validRatios.every(r => Math.abs(r - firstRatio) < 0.01);
+  allSameAspectRatio = validRatios.every(r => Math.abs(r - firstRatio) < SAME_ASPECT_TOLERANCE);
   }
 
   // Media rendering
@@ -210,7 +216,7 @@ async function createCard(tweet) {
     grid.className = "media-grid";
 
     if (tweet.media.length === 3) {
-      const firstIsWide = imageRatios[0] && imageRatios[0] > 1.2;
+  const firstIsWide = imageRatios[0] && imageRatios[0] > WIDE_IMAGE_THRESHOLD;
 
       if (firstIsWide) {
         grid.classList.add("three-wide-top");
@@ -320,7 +326,7 @@ function setupLazyLoad() {
     if (entries.some(e => e.isIntersecting) && loadedCount < tweets.length) {
       loadMoreTweets();
     }
-  }, { rootMargin: "1000px" });
+  }, { rootMargin: SCROLL_ROOT_MARGIN });
 
   observer.observe(sentinel);
 }
@@ -334,7 +340,7 @@ function setupWebSocketPing() {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send("ping");
       }
-    }, 5000);
+  }, WS_PING_INTERVAL_MS);
   };
 
   socket.onmessage = (event) => {

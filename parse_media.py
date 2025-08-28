@@ -6,6 +6,7 @@ from hashlib import md5
 from PIL import Image
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+from typing import Dict, List, Optional, Any
 
 # --- Configuration ---
 CONFIG_FILE = "config.json"
@@ -29,8 +30,16 @@ except Exception as e:
 
 DOWNLOAD_IMAGES = config.get("DOWNLOAD_IMAGES", True)
 
+# --- Constants ---
+CONVERT_EXTS = {'.jpg', '.jpeg', '.png'}
+WEBP_QUALITY = 60
+REQUEST_TIMEOUT_SECONDS = 10
+MAX_MEDIA_PER_TWEET = 4
+MAX_TWEET_DOWNLOAD_WORKERS = 1 + MAX_MEDIA_PER_TWEET  # avatar + media
+HASH_CHUNK_SIZE = 65536
+
 # --- Utilities ---
-def load_json_file(path, default):
+def load_json_file(path: Path, default: Any):
     if path.exists():
         try:
             with open(path, "r", encoding="utf8") as f:
@@ -39,14 +48,14 @@ def load_json_file(path, default):
             print(f"[LoadJSON] Failed to load {path}: {e}")
     return default
 
-def save_json_file(path, data):
+def save_json_file(path: Path, data: Any):
     try:
         with open(path, "w", encoding="utf8") as f:
             json.dump(data, f)
     except Exception as e:
         print(f"[SaveJSON] Failed to save {path}: {e}")
 
-def compute_file_hash(filepath, chunk_size=65536):
+def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
     h = md5()
     try:
         with filepath.open("rb") as f:
@@ -57,7 +66,7 @@ def compute_file_hash(filepath, chunk_size=65536):
         print(f"[Hash] Failed to hash {filepath}: {e}")
         return ""
 
-def convert_to_webp(filepath, quality=60):
+def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
     webp_path = filepath.with_suffix(".webp")
     if webp_path.exists():
         return webp_path
@@ -79,25 +88,25 @@ def canonical_media_filename(url: str) -> str:
         return ""
     ext = Path(urlparse(url).path).suffix.lower()
     h = md5(url.encode()).hexdigest()
-    if ext in {'.jpg', '.jpeg', '.png'}:
+    if ext in CONVERT_EXTS:
         return f"{h}.webp"
     return f"{h}{ext}"
 
 # --- Hash & Duplicate Management ---
-def load_hash_cache():
+def load_hash_cache() -> Dict[str, str]:
     return load_json_file(MEDIA_HASH_CACHE, {})
 
-def save_hash_cache(hash_map):
+def save_hash_cache(hash_map: Dict[str, str]):
     save_json_file(MEDIA_HASH_CACHE, hash_map)
 
-def load_duplicate_urls():
+def load_duplicate_urls() -> Dict[str, str]:
     data = load_json_file(DUPLICATE_URLS_FILE, {})
     return data if isinstance(data, dict) else {}
 
-def save_duplicate_urls(url_map):
+def save_duplicate_urls(url_map: Dict[str, str]):
     save_json_file(DUPLICATE_URLS_FILE, url_map)
 
-def refresh_media_cache():
+def refresh_media_cache() -> None:
     """Maintain media cache: remove orphan files, dedupe duplicates, rebuild hash map."""
     if not DOWNLOAD_IMAGES:
         return
@@ -114,7 +123,7 @@ def refresh_media_cache():
                 if av:
                     referenced_files.add(canonical_media_filename(av))
                 # media urls (limit consistent with processing)
-                for url in t.get("tweet_media_urls", [])[:4]:
+                for url in t.get("tweet_media_urls", [])[:MAX_MEDIA_PER_TWEET]:
                     referenced_files.add(canonical_media_filename(url))
         except Exception as e:
             print(f"[Cache] Failed to compute referenced media: {e}")
@@ -124,7 +133,7 @@ def refresh_media_cache():
     orphans_removed = 0
     seen_hashes = {}
 
-    for folder in [MEDIA_DIR, AVATAR_DIR]:
+    for folder in (MEDIA_DIR, AVATAR_DIR):
         for file_path in list(folder.iterdir()):
             if not file_path.is_file():
                 continue
@@ -157,7 +166,8 @@ def refresh_media_cache():
         print(f"[Orphan] Removed {orphans_removed} unreferenced files.")
 
 # --- Media Downloading (Threaded) ---
-def download_single_file(url, folder, convert=True, hash_cache=None, known_duplicates=None):
+def download_single_file(url: str, folder: Path, convert: bool = True, hash_cache: Optional[Dict[str, str]] = None,
+                         known_duplicates: Optional[Dict[str, str]] = None) -> Optional[str]:
     if not url:
         return None
     if isinstance(known_duplicates, dict) and url in known_duplicates and known_duplicates[url]:
@@ -175,7 +185,7 @@ def download_single_file(url, folder, convert=True, hash_cache=None, known_dupli
 
     original_path = folder / f"{hashed_name}{ext}"
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
         resp.raise_for_status()
         original_path.write_bytes(resp.content)
         print(f"[Download] Saved: {url} -> {original_path.name}")
@@ -183,7 +193,7 @@ def download_single_file(url, folder, convert=True, hash_cache=None, known_dupli
         print(f"[Download] Failed: {url} ({e})")
         return None
 
-    if convert and original_path.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+    if convert and original_path.suffix.lower() in CONVERT_EXTS:
         final_path = convert_to_webp(original_path)
 
     if hash_cache:
@@ -199,10 +209,13 @@ def download_single_file(url, folder, convert=True, hash_cache=None, known_dupli
                 print(f"[Duplicate] Failed to remove {final_path.name}: {e}")
         else:
             hash_cache[file_hash] = final_path.name
+            # For future lookups of same URL (rare but possible)
+            if isinstance(known_duplicates, dict):
+                known_duplicates[url] = final_path.name
 
     return final_path.name
 
-def download_media_for_tweet(urls, hash_cache=None):
+def download_media_for_tweet(urls: List[tuple], hash_cache: Optional[Dict[str, str]] = None) -> Dict[str, Optional[str]]:
     """
     Download all media for a single tweet.
     Uses threads, max 5 files (avatar + 4 media) per tweet.
@@ -212,7 +225,7 @@ def download_media_for_tweet(urls, hash_cache=None):
     known_duplicates = load_duplicate_urls()
 
     # Use a small thread pool because only 5 downloads per tweet
-    with ThreadPoolExecutor(max_workers=min(5, len(urls))) as executor:
+    with ThreadPoolExecutor(max_workers=min(MAX_TWEET_DOWNLOAD_WORKERS, len(urls))) as executor:
         futures = {executor.submit(download_single_file, url, folder, True, hash_cache, known_duplicates): url
                    for url, folder in urls}
 
@@ -224,12 +237,12 @@ def download_media_for_tweet(urls, hash_cache=None):
     return results
 
 # --- Tweet Processing ---
-def process_tweets(tweets):
+def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     processed = []
     hash_cache = load_hash_cache() if DOWNLOAD_IMAGES else None
 
     for idx, tweet in enumerate(tweets):
-        media_urls = tweet.get("tweet_media_urls", [])[:4]  # limit to 4 media per tweet
+        media_urls = tweet.get("tweet_media_urls", [])[:MAX_MEDIA_PER_TWEET]  # limit media per tweet
         # Skip tweets that have no media at all
         if not media_urls:
             continue
@@ -265,7 +278,7 @@ def process_tweets(tweets):
     return processed
 
 # --- Main ---
-def main():
+def main() -> None:
     if DOWNLOAD_IMAGES:
         refresh_media_cache()
 

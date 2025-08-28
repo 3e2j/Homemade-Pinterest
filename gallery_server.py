@@ -26,8 +26,10 @@ LOG = logging.getLogger("gallery_server")
 # ==== Constants ====
 PORT = 8000
 WS_PORT = 8765
-CLIENT_TIMEOUT = 10
-SHUTDOWN_WAIT = 1
+CLIENT_TIMEOUT = 10  # seconds between pings before considering stale
+SHUTDOWN_WAIT = 1    # grace period before shutdown when no clients
+REFRESH_PATH = "/refresh"
+DATA_ENDPOINT = "data.json"
 
 STATIC_DIR = Path("src")
 OUTPUT_DIR = Path("output")
@@ -80,7 +82,7 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
             if output_hit:
                 return str(output_hit)
 
-            if req_path == "data.json":
+            if req_path == DATA_ENDPOINT:
                 return str(DATA_FILE)
 
             return str(STATIC_DIR / "index.html")
@@ -101,7 +103,7 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
                 LOG.info(message)
 
     def do_POST(self):
-        if self.path != "/refresh":
+        if self.path != REFRESH_PATH:
             self.send_error(404, "Unsupported POST endpoint")
             return
 
@@ -136,12 +138,13 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({
+            payload = {
                 "new_found": bool(new_ids),
                 "new_tweets": new_tweets,
                 "updated": bool(file_updated),
                 "new_count": len(new_tweets)
-            }).encode())
+            }
+            self.wfile.write(json.dumps(payload).encode())
         except Exception as e:
             LOG.exception("Unhandled error in /refresh")
             try:

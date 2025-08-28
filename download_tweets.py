@@ -9,6 +9,11 @@ CONFIG_FILE = Path("config.json")
 OUTPUT_DIR = Path("output")
 OUTPUT_FILE = OUTPUT_DIR / "liked_tweets.json"
 
+# ---- Constants ----
+DEFAULT_CONSECUTIVE_SEEN_LIMIT = 50
+LIKES_REQUEST_PAGE_SIZE = 100
+REQUEST_TIMEOUT_SECONDS = 15
+
 
 class TweetDownloader:
     """
@@ -26,7 +31,7 @@ class TweetDownloader:
         self.header_cookie = config.get('HEADER_COOKIES')
         self.header_csrf = config.get('HEADER_CSRF')
 
-    def retrieve_all_likes(self, consecutive_seen_limit: int = 50):
+    def retrieve_all_likes(self, consecutive_seen_limit: int = DEFAULT_CONSECUTIVE_SEEN_LIMIT):
         """
         Fetches all liked tweets, deduplicates, and saves to OUTPUT_FILE.
         """
@@ -134,7 +139,7 @@ class TweetDownloader:
                 likes_url,
                 params={"variables": variables_data_encoded, "features": features_data_encoded},
                 headers=self.likes_request_headers(),
-                timeout=15
+                timeout=REQUEST_TIMEOUT_SECONDS
             )
             response.raise_for_status()
             return self.extract_likes_entries(response.json())
@@ -158,7 +163,7 @@ class TweetDownloader:
     def likes_request_variables_data(self, cursor: Optional[str] = None) -> Dict[str, Any]:
         variables_data = {
             "userId": self.twitter_user_id,
-            "count": 100,
+            "count": LIKES_REQUEST_PAGE_SIZE,
             "includePromotedContent": False,
             "withSuperFollowsUserFields": False,
             "withDownvotePerspective": False,
