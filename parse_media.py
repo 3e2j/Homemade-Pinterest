@@ -70,6 +70,19 @@ def convert_to_webp(filepath, quality=60):
         print(f"[WebP] Failed to convert {filepath} to webp: {e}")
         return filepath
 
+# --- Filename Canonicalization ---
+def canonical_media_filename(url: str) -> str:
+    """Return the on-disk filename we would use for a given media URL.
+    JPG/PNG become .webp, others keep their original extension.
+    """
+    if not url:
+        return ""
+    ext = Path(urlparse(url).path).suffix.lower()
+    h = md5(url.encode()).hexdigest()
+    if ext in {'.jpg', '.jpeg', '.png'}:
+        return f"{h}.webp"
+    return f"{h}{ext}"
+
 # --- Hash & Duplicate Management ---
 def load_hash_cache():
     return load_json_file(MEDIA_HASH_CACHE, {})
@@ -84,40 +97,64 @@ def load_duplicate_urls():
 def save_duplicate_urls(url_map):
     save_json_file(DUPLICATE_URLS_FILE, url_map)
 
-def recompute_hashes_and_remove_duplicates():
+def refresh_media_cache():
+    """Maintain media cache: remove orphan files, dedupe duplicates, rebuild hash map."""
     if not DOWNLOAD_IMAGES:
         return
 
-    hash_cache = load_hash_cache()
+    # Build set of referenced filenames by hashing URLs in liked_tweets.json
+    referenced_files = set()
+    if JSON_FILE.exists():
+        try:
+            with open(JSON_FILE, encoding="utf8") as f:
+                tweets = json.load(f)
+            for t in tweets:
+                # avatar
+                av = t.get("user_avatar_url")
+                if av:
+                    referenced_files.add(canonical_media_filename(av))
+                # media urls (limit consistent with processing)
+                for url in t.get("tweet_media_urls", [])[:4]:
+                    referenced_files.add(canonical_media_filename(url))
+        except Exception as e:
+            print(f"[Cache] Failed to compute referenced media: {e}")
+
+    hash_cache = {}
     duplicates_removed = 0
+    orphans_removed = 0
     seen_hashes = {}
 
     for folder in [MEDIA_DIR, AVATAR_DIR]:
-        for file_path in folder.iterdir():
+        for file_path in list(folder.iterdir()):
             if not file_path.is_file():
                 continue
-
+            fname = file_path.name
+            if referenced_files and fname not in referenced_files:
+                try:
+                    file_path.unlink()
+                    orphans_removed += 1
+                    continue
+                except Exception as e:
+                    print(f"[Orphan] Failed to remove {fname}: {e}")
             file_hash = compute_file_hash(file_path)
             if not file_hash:
                 continue
-
             if file_hash in seen_hashes:
                 try:
                     file_path.unlink()
                     duplicates_removed += 1
-                    print(f"[Duplicate] Removed {file_path.name} (duplicate of {seen_hashes[file_hash]})")
+                    print(f"[Duplicate] Removed {fname} (duplicate of {seen_hashes[file_hash]})")
                 except Exception as e:
-                    print(f"[Duplicate] Failed to remove {file_path.name}: {e}")
+                    print(f"[Duplicate] Failed to remove {fname}: {e}")
                 continue
-
-            seen_hashes[file_hash] = file_path.name
-            if file_hash not in hash_cache:
-                hash_cache[file_hash] = file_path.name
-                print(f"[HashUpdate] Added missing hash for {file_path.name}")
+            seen_hashes[file_hash] = fname
+            hash_cache[file_hash] = fname
 
     save_hash_cache(hash_cache)
-    if duplicates_removed > 0:
-        print(f"[Duplicate] Removed {duplicates_removed} duplicates and updated hash cache.")
+    if duplicates_removed:
+        print(f"[Duplicate] Removed {duplicates_removed} duplicates.")
+    if orphans_removed:
+        print(f"[Orphan] Removed {orphans_removed} unreferenced files.")
 
 # --- Media Downloading (Threaded) ---
 def download_single_file(url, folder, convert=True, hash_cache=None, known_duplicates=None):
@@ -127,9 +164,10 @@ def download_single_file(url, folder, convert=True, hash_cache=None, known_dupli
         # Already known duplicate; return canonical filename
         return known_duplicates[url]
 
+    final_name = canonical_media_filename(url)
+    # Recover original ext for initial download before potential conversion
     ext = Path(urlparse(url).path).suffix
     hashed_name = md5(url.encode()).hexdigest()
-    final_name = f"{hashed_name}.webp" if ext.lower() in {".jpg", ".jpeg", ".png"} else f"{hashed_name}{ext}"
     final_path = folder / final_name
 
     if final_path.exists():
@@ -229,7 +267,7 @@ def process_tweets(tweets):
 # --- Main ---
 def main():
     if DOWNLOAD_IMAGES:
-        recompute_hashes_and_remove_duplicates()
+        refresh_media_cache()
 
     with open(JSON_FILE, encoding="utf8") as f:
         tweets = json.load(f)
