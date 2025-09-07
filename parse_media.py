@@ -106,64 +106,98 @@ def load_duplicate_urls() -> Dict[str, str]:
 def save_duplicate_urls(url_map: Dict[str, str]):
     save_json_file(DUPLICATE_URLS_FILE, url_map)
 
-def refresh_media_cache() -> None:
-    """Maintain media cache: remove orphan files, dedupe duplicates, rebuild hash map."""
+def full_cleanup() -> None:
+    """Full-scale cleanup:
+    - Remove unreferenced files (not referenced in liked_tweets.json) if references are available
+    - Deduplicate files by content hash (keep first seen)
+    - Rebuild and save the hash cache
+    - Fix entries in the duplicate-URL map so they point to existing files
+    """
     if not DOWNLOAD_IMAGES:
         return
 
-    # Build set of referenced filenames by hashing URLs in liked_tweets.json
+    # Build referenced filenames set from JSON (if available)
     referenced_files = set()
     if JSON_FILE.exists():
         try:
             with open(JSON_FILE, encoding="utf8") as f:
                 tweets = json.load(f)
             for t in tweets:
-                # avatar
                 av = t.get("user_avatar_url")
                 if av:
                     referenced_files.add(canonical_media_filename(av))
-                # media urls (limit consistent with processing)
                 for url in t.get("tweet_media_urls", [])[:MAX_MEDIA_PER_TWEET]:
                     referenced_files.add(canonical_media_filename(url))
         except Exception as e:
-            print(f"[Cache] Failed to compute referenced media: {e}")
+            print(f"[UnreferencedFiles] Failed to compute referenced media: {e}")
 
-    hash_cache = {}
-    duplicates_removed = 0
+    # First pass: remove orphans (only if we have a set of references)
     orphans_removed = 0
+    for folder in (MEDIA_DIR, AVATAR_DIR):
+        for file_path in list(folder.iterdir()):
+            if not file_path.is_file():
+                continue
+            if referenced_files and file_path.name not in referenced_files:
+                try:
+                    file_path.unlink()
+                    orphans_removed += 1
+                except Exception as e:
+                    print(f"[UnreferencedFiles] Failed to remove {file_path.name}: {e}")
+
+    if orphans_removed:
+        print(f"[UnreferencedFiles] Removed {orphans_removed} unreferenced files.")
+
+    # Second pass: dedupe by hash and rebuild hash cache
+    hash_map = {}
     seen_hashes = {}
+    duplicates_removed = 0
+    removed_to_kept = {}  # map removed filename -> kept filename
 
     for folder in (MEDIA_DIR, AVATAR_DIR):
         for file_path in list(folder.iterdir()):
             if not file_path.is_file():
                 continue
-            fname = file_path.name
-            if referenced_files and fname not in referenced_files:
-                try:
-                    file_path.unlink()
-                    orphans_removed += 1
-                    continue
-                except Exception as e:
-                    print(f"[Orphan] Failed to remove {fname}: {e}")
-            file_hash = compute_file_hash(file_path)
+            try:
+                file_hash = compute_file_hash(file_path)
+            except Exception:
+                file_hash = ""
             if not file_hash:
                 continue
             if file_hash in seen_hashes:
+                # duplicate content -> remove this file and map to the canonical name
+                kept_name = seen_hashes[file_hash]
                 try:
+                    removed_name = file_path.name
                     file_path.unlink()
                     duplicates_removed += 1
-                    print(f"[Duplicate] Removed {fname} (duplicate of {seen_hashes[file_hash]})")
+                    removed_to_kept[removed_name] = kept_name
+                    print(f"[Duplicate] Removed {removed_name} (duplicate of {kept_name})")
                 except Exception as e:
-                    print(f"[Duplicate] Failed to remove {fname}: {e}")
+                    print(f"[Duplicate] Failed to remove {file_path.name}: {e}")
                 continue
-            seen_hashes[file_hash] = fname
-            hash_cache[file_hash] = fname
+            # unique file
+            seen_hashes[file_hash] = file_path.name
+            hash_map[file_hash] = file_path.name
 
-    save_hash_cache(hash_cache)
+    save_hash_cache(hash_map)
     if duplicates_removed:
         print(f"[Duplicate] Removed {duplicates_removed} duplicates.")
-    if orphans_removed:
-        print(f"[Orphan] Removed {orphans_removed} unreferenced files.")
+
+    # Third: fix duplicate-URL mappings to point at existing files, remove stale entries
+    dup_map = load_duplicate_urls()
+    changed = False
+    for url, mapped in list(dup_map.items()):
+        # If mapped was removed during dedupe, update to kept name
+        if mapped in removed_to_kept:
+            dup_map[url] = removed_to_kept[mapped]
+            changed = True
+        # If mapped no longer exists on disk, drop the mapping
+        elif mapped and not ((MEDIA_DIR / mapped).exists() or (AVATAR_DIR / mapped).exists()):
+            del dup_map[url]
+            changed = True
+
+    if changed:
+        save_duplicate_urls(dup_map)
 
 # --- Media Downloading (Threaded) ---
 def download_single_file(url: str, folder: Path, convert: bool = True, hash_cache: Optional[Dict[str, str]] = None,
@@ -209,9 +243,6 @@ def download_single_file(url: str, folder: Path, convert: bool = True, hash_cach
                 print(f"[Duplicate] Failed to remove {final_path.name}: {e}")
         else:
             hash_cache[file_hash] = final_path.name
-            # For future lookups of same URL (rare but possible)
-            if isinstance(known_duplicates, dict):
-                known_duplicates[url] = final_path.name
 
     return final_path.name
 
@@ -280,7 +311,8 @@ def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # --- Main ---
 def main() -> None:
     if DOWNLOAD_IMAGES:
-        refresh_media_cache()
+        # perform full cleanup (orphans, dedupe, rebuild hash cache)
+        full_cleanup()
 
     with open(JSON_FILE, encoding="utf8") as f:
         tweets = json.load(f)
