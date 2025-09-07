@@ -1,3 +1,16 @@
+"""parse_media.py
+==================
+
+Minimal helpers to download, normalize, and deduplicate tweet media.
+
+Outputs: files under ``output/images`` and a compact ``output/data.json``.
+
+Key decisions:
+- Filenames = MD5(URL) for determinism.
+- Convert common rasters (.jpg/.png) to .webp to reduce disk usage.
+- Maintain two small on-disk caches: file-hash->filename and url->filename.
+"""
+
 import json
 import requests
 from pathlib import Path
@@ -20,7 +33,8 @@ MEDIA_HASH_CACHE = OUTPUT_DIR / ".media_hashes.json"
 DUPLICATE_URLS_FILE = OUTPUT_DIR / ".duplicate_urls.json"
 PROCESSED_JSON = OUTPUT_DIR / "data.json"
 
-for folder in [MEDIA_DIR, AVATAR_DIR]:
+for folder in (MEDIA_DIR, AVATAR_DIR):
+    # Create output directories up-front so code can assume they exist.
     folder.mkdir(parents=True, exist_ok=True)
 
 try:
@@ -33,18 +47,24 @@ except Exception as e:
 DOWNLOAD_IMAGES = config.get("DOWNLOAD_IMAGES", True)
 
 # --- Constants ---
+# Extensions we convert to WebP (others are preserved as-is).
 CONVERT_EXTS = {'.jpg', '.jpeg', '.png'}
+
+# Tuning: quality, timeouts and IO chunk sizes
 WEBP_QUALITY = 60
 REQUEST_TIMEOUT_SECONDS = 10
 MAX_MEDIA_PER_TWEET = 4
 HASH_CHUNK_SIZE = 65536
-WEBP_METHOD = 6  # Pillow webp 'method' param (0-6) — kept as a constant for readability
-MAX_THREADPOOL_WORKERS = 32  # cap used when computing default max_workers
-DOWNLOAD_STREAM_CHUNK = 8192  # bytes to read per streamed chunk when downloading
+WEBP_METHOD = 6  # Pillow webp 'method' (0-6): higher may be slower but smaller
+MAX_THREADPOOL_WORKERS = 32
+DOWNLOAD_STREAM_CHUNK = 8192
+
+# Protect shared in-memory maps (hash cache, duplicate map) across threads
 SHARED_LOCK = threading.Lock()
 
 # --- Utilities ---
 def load_json_file(path: Path, default: Any):
+    """Load JSON from `path` or return `default` on any error."""
     if path.exists():
         try:
             with open(path, "r", encoding="utf8") as f:
@@ -54,8 +74,8 @@ def load_json_file(path: Path, default: Any):
     return default
 
 def save_json_file(path: Path, data: Any):
+    """Write `data` as JSON to `path`. Logs failures instead of raising."""
     try:
-        # Ensure the parent directory exists before writing
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf8") as f:
             json.dump(data, f)
@@ -63,6 +83,10 @@ def save_json_file(path: Path, data: Any):
         print(f"[SaveJSON] Failed to save {path}: {e}")
 
 def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
+    """Return MD5 hex digest for `filepath` or empty string on error.
+
+    Reads the file in chunks to avoid high memory use.
+    """
     h = md5()
     try:
         with filepath.open("rb") as f:
@@ -74,6 +98,10 @@ def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
         return ""
 
 def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
+    """Convert `filepath` to WebP and remove the original on success.
+
+    Returns the path to the WebP file, or the original path on failure.
+    """
     webp_path = filepath.with_suffix(".webp")
     if webp_path.exists():
         return webp_path
@@ -88,37 +116,38 @@ def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
 
 # --- Filename Canonicalization ---
 def canonical_media_filename(url: str) -> str:
-    """Return the on-disk filename we would use for a given media URL.
-    JPG/PNG become .webp, others keep their original extension.
+    """Deterministic filename for a media URL (MD5 of URL).
+
+    Normalizes common image extensions to ``.webp`` to match storage.
     """
     if not url:
         return ""
     ext = Path(urlparse(url).path).suffix.lower()
     h = md5(url.encode()).hexdigest()
-    if ext in CONVERT_EXTS:
-        return f"{h}.webp"
-    return f"{h}{ext}"
+    return f"{h}.webp" if ext in CONVERT_EXTS else f"{h}{ext}"
 
 # --- Hash & Duplicate Management ---
 def load_hash_cache() -> Dict[str, str]:
+    """Load the content-hash -> filename cache used for deduplication."""
     return load_json_file(MEDIA_HASH_CACHE, {})
 
 def save_hash_cache(hash_map: Dict[str, str]):
+    """Save the hash->filename cache to disk."""
     save_json_file(MEDIA_HASH_CACHE, hash_map)
 
 def load_duplicate_urls() -> Dict[str, str]:
+    """Load the URL -> filename map (avoids re-downloading identical URLs)."""
     data = load_json_file(DUPLICATE_URLS_FILE, {})
     return data if isinstance(data, dict) else {}
 
 def save_duplicate_urls(url_map: Dict[str, str]):
+    """Persist the URL->filename mapping."""
     save_json_file(DUPLICATE_URLS_FILE, url_map)
 
 def full_cleanup() -> None:
-    """Full-scale cleanup:
-    - Remove unreferenced files (not referenced in liked_tweets.json) if references are available
-    - Deduplicate files by content hash (keep first seen)
-    - Rebuild and save the hash cache
-    - Fix entries in the duplicate-URL map so they point to existing files
+    """Remove orphaned files, dedupe identical files, and rebuild caches.
+
+    This is tolerant: errors are logged and the process continues.
     """
     if not DOWNLOAD_IMAGES:
         return
@@ -138,7 +167,7 @@ def full_cleanup() -> None:
         except Exception as e:
             print(f"[UnreferencedFiles] Failed to compute referenced media: {e}")
 
-    # First pass: remove orphans (only if we have a set of references)
+    # First pass: remove files not referenced by the tweets JSON (if available)
     orphans_removed = 0
     for folder in (MEDIA_DIR, AVATAR_DIR):
         for file_path in list(folder.iterdir()):
@@ -154,7 +183,7 @@ def full_cleanup() -> None:
     if orphans_removed:
         print(f"[UnreferencedFiles] Removed {orphans_removed} unreferenced files.")
 
-    # Second pass: dedupe by hash and rebuild hash cache
+    # Second pass: dedupe by content-hash and rebuild hash cache
     hash_map = {}
     seen_hashes = {}
     duplicates_removed = 0
@@ -190,7 +219,7 @@ def full_cleanup() -> None:
     if duplicates_removed:
         print(f"[Duplicate] Removed {duplicates_removed} duplicates.")
 
-    # Third: fix duplicate-URL mappings to point at existing files, remove stale entries
+    # Third: repair URL->filename mappings to reflect removed/kept files
     dup_map = load_duplicate_urls()
     changed = False
     for url, mapped in list(dup_map.items()):
@@ -209,17 +238,24 @@ def full_cleanup() -> None:
 # --- Media Downloading (Threaded) ---
 def download_single_file(url: str, folder: Path, convert: bool = True, hash_cache: Optional[Dict[str, str]] = None,
                          known_duplicates: Optional[Dict[str, str]] = None) -> Optional[str]:
+    """Download `url` into `folder` and return the stored filename or None.
+
+    Notes:
+    - Uses an intermediate name (MD5(url)+orig_ext) for the download, then
+      optionally converts to webp and moves to the canonical filename.
+    - Uses `hash_cache` to dedupe identical content; updates `known_duplicates`
+      under a lock to avoid races between threads.
+    """
     if not url:
         return None
-    # Protect known_duplicates checks/updates across threads
+
+    # Fast-path: if another thread already recorded this URL, return it.
     if isinstance(known_duplicates, dict):
         with SHARED_LOCK:
-            if url in known_duplicates and known_duplicates[url]:
-                # Already known duplicate; return canonical filename
+            if known_duplicates.get(url):
                 return known_duplicates[url]
 
     final_name = canonical_media_filename(url)
-    # Recover original ext for initial download before potential conversion
     ext = Path(urlparse(url).path).suffix
     hashed_name = md5(url.encode()).hexdigest()
     final_path = folder / final_name
@@ -229,7 +265,6 @@ def download_single_file(url: str, folder: Path, convert: bool = True, hash_cach
 
     original_path = folder / f"{hashed_name}{ext}"
     try:
-        # Stream the download to avoid holding large responses in memory
         resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS, stream=True)
         resp.raise_for_status()
         with original_path.open("wb") as out_f:
@@ -244,12 +279,12 @@ def download_single_file(url: str, folder: Path, convert: bool = True, hash_cach
     if convert and original_path.suffix.lower() in CONVERT_EXTS:
         final_path = convert_to_webp(original_path)
 
-    if hash_cache:
+    if hash_cache is not None:
         file_hash = compute_file_hash(final_path)
-        # protect the shared hash cache and duplicate map with a lock
         with SHARED_LOCK:
             if file_hash in hash_cache:
                 try:
+                    # Duplicate content: remove this copy and point to existing file
                     final_path.unlink()
                     existing_name = hash_cache[file_hash]
                     if isinstance(known_duplicates, dict):
@@ -265,8 +300,10 @@ def download_single_file(url: str, folder: Path, convert: bool = True, hash_cach
 
 def download_bulk_media(url_folder_pairs: List[tuple], hash_cache: Optional[Dict[str, str]] = None,
                         max_workers: Optional[int] = None) -> Dict[str, Optional[str]]:
-    """Download all unique media in the provided list (url, folder) pairs using a shared thread pool.
-    Returns a mapping url -> filename (or None on failure).
+    """Download unique URLs from `url_folder_pairs` using a thread pool.
+
+    Returns a map url->filename (None on failure). Avoids downloading the same
+    URL multiple times by using a local unique set.
     """
     if not url_folder_pairs:
         return {}
@@ -279,14 +316,12 @@ def download_bulk_media(url_folder_pairs: List[tuple], hash_cache: Optional[Dict
     known_duplicates = load_duplicate_urls()
     results: Dict[str, Optional[str]] = {}
 
-    # Use unique urls to avoid duplicate downloads
+    # Deduplicate input URLs; keep first-seen target folder for each URL.
     unique_pairs = {}
     for url, folder in url_folder_pairs:
         if not url:
             continue
-        # prefer first-seen folder for same url
-        if url not in unique_pairs:
-            unique_pairs[url] = folder
+        unique_pairs.setdefault(url, folder)
 
     with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(unique_pairs)))) as executor:
         futures = {executor.submit(download_single_file, url, folder, True, hash_cache, known_duplicates): url
@@ -301,10 +336,14 @@ def download_bulk_media(url_folder_pairs: List[tuple], hash_cache: Optional[Dict
 
 # --- Tweet Processing ---
 def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Simplify raw tweet records and optionally download referenced media.
+
+    Returns a list of processed dicts with stable filenames for media.
+    """
     processed = []
     hash_cache = load_hash_cache() if DOWNLOAD_IMAGES else None
 
-    # Build a global list of urls to download (avatar + media) to reuse a single thread pool.
+    # Collect URLs and corresponding target folders for a single bulk download.
     all_url_pairs: List[tuple] = []
     tweets_with_media: List[tuple] = []  # (idx, tweet, media_urls, avatar_url)
 
@@ -319,12 +358,10 @@ def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 all_url_pairs.append((avatar_url, AVATAR_DIR))
             all_url_pairs.extend([(url, MEDIA_DIR) for url in media_urls])
 
-    # Bulk download all media once
     downloaded_map: Dict[str, Optional[str]] = {}
     if DOWNLOAD_IMAGES and all_url_pairs:
         downloaded_map = download_bulk_media(all_url_pairs, hash_cache=hash_cache)
 
-    # Now construct processed entries using downloaded_map
     for idx, tweet, media_urls, avatar_url in tweets_with_media:
         avatar_name = downloaded_map.get(avatar_url, avatar_url) if DOWNLOAD_IMAGES else avatar_url
         media_names = [downloaded_map.get(url, url) for url in media_urls] if DOWNLOAD_IMAGES else media_urls
@@ -346,8 +383,8 @@ def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 # --- Main ---
 def main() -> None:
+    """Entry point: optionally clean, process liked tweets, and write `data.json`."""
     if DOWNLOAD_IMAGES:
-        # perform full cleanup (orphans, dedupe, rebuild hash cache)
         full_cleanup()
 
     with open(JSON_FILE, encoding="utf8") as f:
