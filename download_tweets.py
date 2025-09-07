@@ -100,12 +100,24 @@ class TweetDownloader:
             print(f"Total saved tweets: {len(fetched_tweets)}")
             return
 
-        # Merge and deduplicate
-        streak_start_index = next((i for i, t in enumerate(existing_tweets) if t["tweet_id"] in fetched_ids), None)
-        if streak_start_index is None:
-            merged = fetched_tweets + existing_tweets
+    # Merge: overwrite the recently fetched window with fresh data,
+    # but preserve older tweets that lie beyond the consecutive-seen cutoff.
+        if fetched_tweets:
+            oldest_fetched_id = fetched_tweets[-1]["tweet_id"]
+            # find index of that id in existing_tweets
+            try:
+                idx = next(i for i, t in enumerate(existing_tweets) if t.get("tweet_id") == oldest_fetched_id)
+            except StopIteration:
+                idx = None
+            if idx is None:
+                # no overlap found; conservatively append all existing tweets
+                merged = fetched_tweets + existing_tweets
+            else:
+                # preserve only tweets older than the oldest fetched one
+                merged = fetched_tweets + existing_tweets[idx + 1:]
         else:
-            merged = fetched_tweets + existing_tweets[streak_start_index + 1:]
+            # nothing fetched; keep existing tweets as-is
+            merged = existing_tweets
 
         seen: set[str] = set()
         deduped: list[dict] = []
