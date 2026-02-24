@@ -28,28 +28,41 @@ pip install -r requirements.txt
 ```
 
 ### 2. Configure Credentials
-Edit `config.json`:
+Create a `.env` file in the project root with your Twitter/X credentials:
 
-- `USER_ID`
-- `HEADER_AUTHORIZATION`
-- `HEADER_COOKIES`
-- `HEADER_CSRF`
-- `DOWNLOAD_IMAGES` (boolean)
+```env
+USER_ID=your_user_id_here
+HEADER_AUTHORIZATION=Bearer your_authorization_token
+HEADER_COOKIES=your_complete_cookie_string
+HEADER_CSRF=your_csrf_token
+```
 
-How to obtain them:
+**How to obtain credentials:**
 1. Open Twitter / X in a desktop browser and go to your Likes page.
 2. Open DevTools (F12), Network tab.
 3. Filter for requests containing `/Likes`.
 4. Select a request to `https://x.com/i/api/.../Likes`.
-5. Copy headers:
-   - `authorization`
-   - `x-csrf-token`
-   - full `cookie` string
-6. Find your numeric `userId` in the request payload or URL.
-7. Paste into `config.json`.  
-   If your cookie string contains double quotes, escape them with a backslash (`\"`).
+5. Copy the following headers:
+   - `authorization` → `HEADER_AUTHORIZATION`
+   - `x-csrf-token` → `HEADER_CSRF`
+   - full `cookie` string → `HEADER_COOKIES`
+6. Find your numeric `userId` in the request payload or URL → `USER_ID`
+7. Paste values into the `.env` file.
 
-### 3. Run
+**Important:** Never share or commit `.env`.
+
+### 3. Configure Application Settings
+Edit `config.json`:
+
+```json
+{
+    "DOWNLOAD_IMAGES": true
+}
+```
+
+- `DOWNLOAD_IMAGES` (boolean): Whether to download and cache images locally. Set to `true` to reduce repeated remote fetches and rate-limit risk.
+
+### 4. Run
 Launch the server:
 ```bash
 python gallery_server.py

@@ -1,18 +1,19 @@
-import os
-import time
-import shutil
-import threading
 import asyncio
-import socketserver
-import webbrowser
-import websockets
+import hashlib
 import json
 import logging
-import hashlib
-from pathlib import Path
+import os
+import shutil
+import socketserver
+import threading
+import time
+import webbrowser
 from http.server import SimpleHTTPRequestHandler
-from urllib.parse import urlparse, unquote
-from typing import Optional, Set, Dict, Any, Tuple
+from pathlib import Path
+from typing import Any, Dict, Optional, Set, Tuple
+from urllib.parse import unquote, urlparse
+
+import websockets
 
 import download_tweets
 import parse_media
@@ -27,8 +28,8 @@ LOG = logging.getLogger("gallery_server")
 # ==== Constants ====
 PORT = 8000
 WS_PORT = 8765
-CLIENT_TIMEOUT = 10          # seconds since last ping before a client is stale
-SHUTDOWN_WAIT = 1            # grace period before shutdown when no clients
+CLIENT_TIMEOUT = 10  # seconds since last ping before a client is stale
+SHUTDOWN_WAIT = 1  # grace period before shutdown when no clients
 REFRESH_PATH = "/refresh"
 DATA_ENDPOINT = "data.json"
 OPEN_BROWSER = True
@@ -41,10 +42,11 @@ IMAGES_DIR = OUTPUT_DIR / "images"
 
 clients: Dict[Any, float] = {}
 
+
 # ==== File Change Detection ====
 def file_fingerprint(path: Path) -> Optional[Tuple[int, int, str]]:
     try:
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             data = f.read()
         stat = path.stat()
         return stat.st_mtime_ns, stat.st_size, hashlib.md5(data).hexdigest()
@@ -53,6 +55,7 @@ def file_fingerprint(path: Path) -> Optional[Tuple[int, int, str]]:
     except Exception as e:
         LOG.error("fingerprint error for %s: %s", path, e)
         return None
+
 
 # ==== Helper ====
 def safe_path(root: Path, rel: str) -> Optional[Path]:
@@ -65,6 +68,7 @@ def safe_path(root: Path, rel: str) -> Optional[Path]:
         LOG.error("safe_path error (%s / %s): %s", root, rel, e)
     return None
 
+
 def read_json(path: Path, default):
     try:
         with open(path, encoding="utf8") as f:
@@ -75,7 +79,10 @@ def read_json(path: Path, default):
         LOG.error("Failed to read %s: %s", path, e)
         return default
 
-def write_json_response(handler: SimpleHTTPRequestHandler, payload: Dict[str, Any], status: int = 200) -> None:
+
+def write_json_response(
+    handler: SimpleHTTPRequestHandler, payload: Dict[str, Any], status: int = 200
+) -> None:
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json")
     handler.end_headers()
@@ -84,6 +91,7 @@ def write_json_response(handler: SimpleHTTPRequestHandler, payload: Dict[str, An
     except BrokenPipeError:
         LOG.debug("BrokenPipe writing JSON response")
         handler.close_connection = True
+
 
 # ==== HTTP Handler ====
 class GalleryRequestHandler(SimpleHTTPRequestHandler):
@@ -125,14 +133,14 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):  # type: ignore[override]
         if self.path == REFRESH_PATH:
-            self._handle_refresh()
+            self.handle_refresh()
         else:
             write_json_response(self, {"error": "not_found"}, 404)
 
     # --- Refresh Logic ---
-    def _handle_refresh(self) -> None:
+    def handle_refresh(self) -> None:
         try:
-            before_ids = self._get_tweet_ids()
+            before_ids = self.get_tweet_ids()
             before_fp = file_fingerprint(LIKED_TWEETS_FILE)
             download_tweets.main()
             after_fp = file_fingerprint(LIKED_TWEETS_FILE)
@@ -140,26 +148,33 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
             new_tweets_list = []
             new_ids: Set[str] = set()
             if file_updated:
-                after_ids = self._get_tweet_ids()
+                after_ids = self.get_tweet_ids()
                 new_ids = after_ids - before_ids
-                self._process_media(new_ids)
+                self.process_media(new_ids)
                 if new_ids:
                     all_tweets = read_json(LIKED_TWEETS_FILE, [])
                     if isinstance(all_tweets, list):
-                        new_tweets_list = [t for t in all_tweets if t.get("tweet_id") in new_ids]
-            write_json_response(self, {
-                "new_found": bool(new_ids),
-                "new_tweets": new_tweets_list,
-                "updated": bool(file_updated),
-                "new_count": len(new_tweets_list)
-            })
+                        new_tweets_list = [
+                            t for t in all_tweets if t.get("tweet_id") in new_ids
+                        ]
+            write_json_response(
+                self,
+                {
+                    "new_found": bool(new_ids),
+                    "new_tweets": new_tweets_list,
+                    "updated": bool(file_updated),
+                    "new_count": len(new_tweets_list),
+                },
+            )
         except Exception as e:
             LOG.exception("Refresh failed")
             write_json_response(self, {"error": "internal", "detail": str(e)}, 500)
 
-    def _process_media(self, new_ids: Set[str]) -> None:
+    def process_media(self, new_ids: Set[str]) -> None:
         if not new_ids:
-            LOG.info("Tweets file changed (no new tweets, likely removals); re-processing media...")
+            LOG.info(
+                "Tweets file changed (no new tweets, likely removals); re-processing media..."
+            )
         else:
             LOG.info("Found %d new tweet(s); processing media...", len(new_ids))
         try:
@@ -167,11 +182,18 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             LOG.error("Media parsing failed: %s", e)
 
-    def _get_tweet_ids(self) -> Set[str]:
+    def get_tweet_ids(self) -> Set[str]:
         data = read_json(LIKED_TWEETS_FILE, [])
         if not isinstance(data, list):
             return set()
-        return {t.get("tweet_id") for t in data if isinstance(t, dict) and t.get("tweet_id")}
+        ids: Set[str] = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            tid = item.get("tweet_id")
+            if tid:
+                ids.add(str(tid))
+        return ids
 
     # Harden against broken pipes
     def send_response(self, code, message=None):  # type: ignore[override]
@@ -190,7 +212,9 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):  # type: ignore[override]
         if self.path.startswith("/data.json"):
-            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header(
+                "Cache-Control", "no-store, no-cache, must-revalidate, max-age=0"
+            )
             self.send_header("Pragma", "no-cache")
             self.send_header("Expires", "0")
         try:
@@ -209,9 +233,11 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
             LOG.error("copyfile error: %s", e)
             self.close_connection = True
 
+
 # ==== Threaded HTTP Server ====
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
+
 
 def start_http_server():
     with ThreadedHTTPServer(("0.0.0.0", PORT), GalleryRequestHandler) as httpd:
@@ -222,6 +248,7 @@ def start_http_server():
             except Exception as e:
                 LOG.debug("Browser open failed: %s", e)
         httpd.serve_forever()
+
 
 # ==== WebSocket Client Monitoring ====
 async def check_clients() -> None:
@@ -237,10 +264,12 @@ async def check_clients() -> None:
             LOG.info("Shutting down (no clients).")
             os._exit(0)
 
+
 async def monitor_clients() -> None:
     while True:
         await asyncio.sleep(CLIENT_TIMEOUT)
         await check_clients()
+
 
 async def ws_handler(websocket):
     LOG.info("[WebSocket] Client connected")
@@ -260,10 +289,12 @@ async def ws_handler(websocket):
         clients.pop(websocket, None)
         await check_clients()
 
+
 async def start_ws() -> None:
     LOG.info("[WebSocket] ws://localhost:%d", WS_PORT)
     async with websockets.serve(ws_handler, "0.0.0.0", WS_PORT):
         await monitor_clients()
+
 
 def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -274,6 +305,6 @@ def main() -> None:
     except KeyboardInterrupt:
         LOG.info("Interrupted. Exiting.")
 
+
 if __name__ == "__main__":
     main()
-

@@ -12,16 +12,17 @@ Key decisions:
 """
 
 import json
-import requests
-from pathlib import Path
-from urllib.parse import urlparse
-from hashlib import md5
-from PIL import Image
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import sys
-from typing import Dict, List, Optional, Any
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from hashlib import md5
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+import requests
+from PIL import Image
 
 # --- Configuration ---
 CONFIG_FILE = "config.json"
@@ -48,7 +49,7 @@ DOWNLOAD_IMAGES = config.get("DOWNLOAD_IMAGES", True)
 
 # --- Constants ---
 # Extensions we convert to WebP (others are preserved as-is).
-CONVERT_EXTS = {'.jpg', '.jpeg', '.png'}
+CONVERT_EXTS = {".jpg", ".jpeg", ".png"}
 
 # Tuning: quality, timeouts and IO chunk sizes
 WEBP_QUALITY = 60
@@ -62,6 +63,7 @@ DOWNLOAD_STREAM_CHUNK = 8192
 # Protect shared in-memory maps (hash cache, duplicate map) across threads
 SHARED_LOCK = threading.Lock()
 
+
 # --- Utilities ---
 def load_json_file(path: Path, default: Any):
     """Load JSON from `path` or return `default` on any error."""
@@ -73,6 +75,7 @@ def load_json_file(path: Path, default: Any):
             print(f"[LoadJSON] Failed to load {path}: {e}")
     return default
 
+
 def save_json_file(path: Path, data: Any):
     """Write `data` as JSON to `path`. Logs failures instead of raising."""
     try:
@@ -81,6 +84,7 @@ def save_json_file(path: Path, data: Any):
             json.dump(data, f)
     except Exception as e:
         print(f"[SaveJSON] Failed to save {path}: {e}")
+
 
 def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
     """Return MD5 hex digest for `filepath` or empty string on error.
@@ -96,6 +100,7 @@ def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
     except Exception as e:
         print(f"[Hash] Failed to hash {filepath}: {e}")
         return ""
+
 
 def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
     """Convert `filepath` to WebP and remove the original on success.
@@ -114,6 +119,7 @@ def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
         print(f"[WebP] Failed to convert {filepath} to webp: {e}")
         return filepath
 
+
 # --- Filename Canonicalization ---
 def canonical_media_filename(url: str) -> str:
     """Deterministic filename for a media URL (MD5 of URL).
@@ -126,23 +132,28 @@ def canonical_media_filename(url: str) -> str:
     h = md5(url.encode()).hexdigest()
     return f"{h}.webp" if ext in CONVERT_EXTS else f"{h}{ext}"
 
+
 # --- Hash & Duplicate Management ---
 def load_hash_cache() -> Dict[str, str]:
     """Load the content-hash -> filename cache used for deduplication."""
     return load_json_file(MEDIA_HASH_CACHE, {})
 
+
 def save_hash_cache(hash_map: Dict[str, str]):
     """Save the hash->filename cache to disk."""
     save_json_file(MEDIA_HASH_CACHE, hash_map)
+
 
 def load_duplicate_urls() -> Dict[str, str]:
     """Load the URL -> filename map (avoids re-downloading identical URLs)."""
     data = load_json_file(DUPLICATE_URLS_FILE, {})
     return data if isinstance(data, dict) else {}
 
+
 def save_duplicate_urls(url_map: Dict[str, str]):
     """Persist the URL->filename mapping."""
     save_json_file(DUPLICATE_URLS_FILE, url_map)
+
 
 def full_cleanup() -> None:
     """Remove orphaned files, dedupe identical files, and rebuild caches.
@@ -207,7 +218,9 @@ def full_cleanup() -> None:
                     file_path.unlink()
                     duplicates_removed += 1
                     removed_to_kept[removed_name] = kept_name
-                    print(f"[Duplicate] Removed {removed_name} (duplicate of {kept_name})")
+                    print(
+                        f"[Duplicate] Removed {removed_name} (duplicate of {kept_name})"
+                    )
                 except Exception as e:
                     print(f"[Duplicate] Failed to remove {file_path.name}: {e}")
                 continue
@@ -228,16 +241,24 @@ def full_cleanup() -> None:
             dup_map[url] = removed_to_kept[mapped]
             changed = True
         # If mapped no longer exists on disk, drop the mapping
-        elif mapped and not ((MEDIA_DIR / mapped).exists() or (AVATAR_DIR / mapped).exists()):
+        elif mapped and not (
+            (MEDIA_DIR / mapped).exists() or (AVATAR_DIR / mapped).exists()
+        ):
             del dup_map[url]
             changed = True
 
     if changed:
         save_duplicate_urls(dup_map)
 
+
 # --- Media Downloading (Threaded) ---
-def download_single_file(url: str, folder: Path, convert: bool = True, hash_cache: Optional[Dict[str, str]] = None,
-                         known_duplicates: Optional[Dict[str, str]] = None) -> Optional[str]:
+def download_single_file(
+    url: str,
+    folder: Path,
+    convert: bool = True,
+    hash_cache: Optional[Dict[str, str]] = None,
+    known_duplicates: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
     """Download `url` into `folder` and return the stored filename or None.
 
     Notes:
@@ -298,8 +319,11 @@ def download_single_file(url: str, folder: Path, convert: bool = True, hash_cach
     return final_path.name
 
 
-def download_bulk_media(url_folder_pairs: List[tuple], hash_cache: Optional[Dict[str, str]] = None,
-                        max_workers: Optional[int] = None) -> Dict[str, Optional[str]]:
+def download_bulk_media(
+    url_folder_pairs: List[tuple],
+    hash_cache: Optional[Dict[str, str]] = None,
+    max_workers: Optional[int] = None,
+) -> Dict[str, Optional[str]]:
     """Download unique URLs from `url_folder_pairs` using a thread pool.
 
     Returns a map url->filename (None on failure). Avoids downloading the same
@@ -323,9 +347,15 @@ def download_bulk_media(url_folder_pairs: List[tuple], hash_cache: Optional[Dict
             continue
         unique_pairs.setdefault(url, folder)
 
-    with ThreadPoolExecutor(max_workers=min(max_workers, max(1, len(unique_pairs)))) as executor:
-        futures = {executor.submit(download_single_file, url, folder, True, hash_cache, known_duplicates): url
-                   for url, folder in unique_pairs.items()}
+    with ThreadPoolExecutor(
+        max_workers=min(max_workers, max(1, len(unique_pairs)))
+    ) as executor:
+        futures = {
+            executor.submit(
+                download_single_file, url, folder, True, hash_cache, known_duplicates
+            ): url
+            for url, folder in unique_pairs.items()
+        }
 
         for future in as_completed(futures):
             url = futures[future]
@@ -333,6 +363,7 @@ def download_bulk_media(url_folder_pairs: List[tuple], hash_cache: Optional[Dict
 
     save_duplicate_urls(known_duplicates)
     return results
+
 
 # --- Tweet Processing ---
 def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -363,23 +394,35 @@ def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         downloaded_map = download_bulk_media(all_url_pairs, hash_cache=hash_cache)
 
     for idx, tweet, media_urls, avatar_url in tweets_with_media:
-        avatar_name = downloaded_map.get(avatar_url, avatar_url) if DOWNLOAD_IMAGES else avatar_url
-        media_names = [downloaded_map.get(url, url) for url in media_urls] if DOWNLOAD_IMAGES else media_urls
+        avatar_name = (
+            downloaded_map.get(avatar_url, avatar_url)
+            if DOWNLOAD_IMAGES
+            else avatar_url
+        )
+        media_names = (
+            [downloaded_map.get(url, url) for url in media_urls]
+            if DOWNLOAD_IMAGES
+            else media_urls
+        )
 
-        processed.append({
-            "id": str(tweet.get("tweet_id") or idx),
-            "avatar": avatar_name,
-            "username": tweet.get("user_name", ""),
-            "handle": tweet.get("user_handle", ""),
-            "content": tweet.get("tweet_content", ""),
-            "media": media_names,
-            "is_video": any("video_thumb" in url for url in media_urls),
-            "possibly_sensitive": tweet.get("possibly_sensitive", "")
-        })
+        processed.append(
+            {
+                "id": str(tweet.get("tweet_id") or idx),
+                "avatar": avatar_name,
+                "username": tweet.get("user_name", ""),
+                "handle": tweet.get("user_handle", ""),
+                "content": tweet.get("tweet_content", ""),
+                "media": media_names,
+                "is_video": any("video_thumb" in url for url in media_urls),
+                "possibly_sensitive": tweet.get("possibly_sensitive", ""),
+            }
+        )
 
-    if DOWNLOAD_IMAGES:
-        save_hash_cache(hash_cache)
+    if DOWNLOAD_IMAGES and isinstance(hash_cache, dict):
+        with SHARED_LOCK:
+            save_hash_cache(hash_cache)
     return processed
+
 
 # --- Main ---
 def main() -> None:
@@ -395,6 +438,7 @@ def main() -> None:
         json.dump(processed_tweets, f)
 
     print(f"[Main] Processed tweets saved to {PROCESSED_JSON}")
+
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-class TweetParser():
+class TweetParser:
     def __init__(self, raw_tweet_json):
         self.is_valid_tweet = True
         self.raw_tweet_json = raw_tweet_json
@@ -8,7 +8,9 @@ class TweetParser():
             self.is_valid_tweet = False
             return
 
-        self.key_data = raw_tweet_json["content"]["itemContent"]["tweet_results"]["result"]
+        self.key_data = raw_tweet_json["content"]["itemContent"]["tweet_results"][
+            "result"
+        ]
         if not self.key_data.get("legacy", None):
             self.is_valid_tweet = False
 
@@ -20,7 +22,7 @@ class TweetParser():
             "user_avatar_url": self.user_avatar_url,
             "tweet_content": self.tweet_content,
             "tweet_media_urls": self.media_urls,
-            "possibly_sensitive": self.possibly_sensitive
+            "possibly_sensitive": self.possibly_sensitive,
         }
 
     @property

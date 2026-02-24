@@ -1,0 +1,14 @@
+# Python venv
+__pycache__
+.venv
+
+# env secrets; never commit this to version control
+.env
+
+# Outputs
+output.json
+output/**
+
+# Development stuff
+start.sh
+dev/

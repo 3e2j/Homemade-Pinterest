@@ -1,9 +1,15 @@
 import json
-import requests
+import os
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
+
+import requests
+from dotenv import load_dotenv
 
 from tweet_parser import TweetParser
+
+# Load environment variables from .env file
+load_dotenv()
 
 CONFIG_FILE = Path("config.json")
 OUTPUT_DIR = Path("output")
@@ -21,17 +27,18 @@ class TweetDownloader:
     """
 
     def __init__(self):
-        self._load_config()
+        self.load_config()
 
-    def _load_config(self):
-        with open(CONFIG_FILE, encoding="utf8") as f:
-            config = json.load(f)
-        self.twitter_user_id = config.get('USER_ID')
-        self.header_authorization = config.get('HEADER_AUTHORIZATION')
-        self.header_cookie = config.get('HEADER_COOKIES')
-        self.header_csrf = config.get('HEADER_CSRF')
+    def load_config(self):
+        # Load secrets from environment variables
+        self.twitter_user_id = os.getenv("USER_ID")
+        self.header_authorization = os.getenv("HEADER_AUTHORIZATION")
+        self.header_cookie = os.getenv("HEADER_COOKIES")
+        self.header_csrf = os.getenv("HEADER_CSRF")
 
-    def retrieve_all_likes(self, consecutive_seen_limit: int = DEFAULT_CONSECUTIVE_SEEN_LIMIT):
+    def retrieve_all_likes(
+        self, consecutive_seen_limit: int = DEFAULT_CONSECUTIVE_SEEN_LIMIT
+    ):
         """
         Fetches all liked tweets, deduplicates, and saves to OUTPUT_FILE.
         """
@@ -42,9 +49,11 @@ class TweetDownloader:
 
         if not first_run:
             try:
-                with open(OUTPUT_FILE, 'r', encoding="utf8") as f:
+                with open(OUTPUT_FILE, "r", encoding="utf8") as f:
                     existing_tweets = json.load(f)
-                    existing_tweet_map = {t["tweet_id"]: t for t in existing_tweets if t.get("tweet_id")}
+                    existing_tweet_map = {
+                        t["tweet_id"]: t for t in existing_tweets if t.get("tweet_id")
+                    }
                     existing_ids_before = set(existing_tweet_map.keys())
             except (json.JSONDecodeError, FileNotFoundError):
                 print("Invalid or missing JSON. Starting fresh.")
@@ -74,7 +83,9 @@ class TweetDownloader:
                 if tweet_id in existing_tweet_map:
                     seen_streak += 1
                     if seen_streak >= consecutive_seen_limit:
-                        print(f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping.")
+                        print(
+                            f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping."
+                        )
                         break
                 else:
                     seen_streak = 0
@@ -94,19 +105,23 @@ class TweetDownloader:
             current_page += 1
 
         if first_run:
-            with open(OUTPUT_FILE, 'w', encoding="utf8") as f:
+            with open(OUTPUT_FILE, "w", encoding="utf8") as f:
                 json.dump(fetched_tweets, f, indent=2)
             print(f"New tweets: {len(fetched_tweets)}")
             print(f"Total saved tweets: {len(fetched_tweets)}")
             return
 
-    # Merge: overwrite the recently fetched window with fresh data,
-    # but preserve older tweets that lie beyond the consecutive-seen cutoff.
+        # Merge: overwrite the recently fetched window with fresh data,
+        # but preserve older tweets that lie beyond the consecutive-seen cutoff.
         if fetched_tweets:
             oldest_fetched_id = fetched_tweets[-1]["tweet_id"]
             # find index of that id in existing_tweets
             try:
-                idx = next(i for i, t in enumerate(existing_tweets) if t.get("tweet_id") == oldest_fetched_id)
+                idx = next(
+                    i
+                    for i, t in enumerate(existing_tweets)
+                    if t.get("tweet_id") == oldest_fetched_id
+                )
             except StopIteration:
                 idx = None
             if idx is None:
@@ -114,7 +129,7 @@ class TweetDownloader:
                 merged = fetched_tweets + existing_tweets
             else:
                 # preserve only tweets older than the oldest fetched one
-                merged = fetched_tweets + existing_tweets[idx + 1:]
+                merged = fetched_tweets + existing_tweets[idx + 1 :]
         else:
             # nothing fetched; keep existing tweets as-is
             merged = existing_tweets
@@ -127,7 +142,7 @@ class TweetDownloader:
                 seen.add(tid)
                 deduped.append(t)
 
-        with open(OUTPUT_FILE, 'w', encoding="utf8") as f:
+        with open(OUTPUT_FILE, "w", encoding="utf8") as f:
             json.dump(deduped, f, indent=2)
 
         final_ids = {t["tweet_id"] for t in deduped}
@@ -139,19 +154,26 @@ class TweetDownloader:
             print(f"Tweets removed: {len(removed_ids)}")
         print(f"Total saved tweets: {len(deduped)}")
 
-    def retrieve_likes_page(self, cursor: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+    def retrieve_likes_page(
+        self, cursor: Optional[str] = None
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Fetches a single page of likes.
         """
-        likes_url = 'https://api.twitter.com/graphql/QK8AVO3RpcnbLPKXLAiVog/Likes'
-        variables_data_encoded = json.dumps(self.likes_request_variables_data(cursor=cursor))
+        likes_url = "https://api.twitter.com/graphql/QK8AVO3RpcnbLPKXLAiVog/Likes"
+        variables_data_encoded = json.dumps(
+            self.likes_request_variables_data(cursor=cursor)
+        )
         features_data_encoded = json.dumps(self.likes_request_features_data())
         try:
             response = requests.get(
                 likes_url,
-                params={"variables": variables_data_encoded, "features": features_data_encoded},
+                params={
+                    "variables": variables_data_encoded,
+                    "features": features_data_encoded,
+                },
                 headers=self.likes_request_headers(),
-                timeout=REQUEST_TIMEOUT_SECONDS
+                timeout=REQUEST_TIMEOUT_SECONDS,
             )
             response.raise_for_status()
             return self.extract_likes_entries(response.json())
@@ -159,20 +181,26 @@ class TweetDownloader:
             print(f"Failed to fetch likes page: {e}")
             return None
 
-    def extract_likes_entries(self, raw_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    def extract_likes_entries(
+        self, raw_data: Dict[str, Any]
+    ) -> Optional[List[Dict[str, Any]]]:
         try:
-            return raw_data['data']['user']['result']['timeline_v2']['timeline']['instructions'][0]['entries']
+            return raw_data["data"]["user"]["result"]["timeline_v2"]["timeline"][
+                "instructions"
+            ][0]["entries"]
         except (KeyError, IndexError, TypeError):
             print("Failed to extract likes entries from response.")
             return None
 
     def get_cursor(self, page_json: List[Dict[str, Any]]) -> Optional[str]:
         try:
-            return page_json[-1]['content']['value']
+            return page_json[-1]["content"]["value"]
         except (KeyError, IndexError, TypeError):
             return None
 
-    def likes_request_variables_data(self, cursor: Optional[str] = None) -> Dict[str, Any]:
+    def likes_request_variables_data(
+        self, cursor: Optional[str] = None
+    ) -> Dict[str, Any]:
         variables_data = {
             "userId": self.twitter_user_id,
             "count": LIKES_REQUEST_PAGE_SIZE,
@@ -185,28 +213,34 @@ class TweetDownloader:
             "withClientEventToken": False,
             "withBirdwatchNotes": False,
             "withVoice": False,
-            "withV2Timeline": True
+            "withV2Timeline": True,
         }
         if cursor:
             variables_data["cursor"] = cursor
         return variables_data
 
     def likes_request_headers(self) -> Dict[str, str]:
+        # os.getenv may return None, but headers must be strings.
+        # Coerce possible None values to empty strings to satisfy the return type.
+        authorization = self.header_authorization or ""
+        cookie = self.header_cookie or ""
+        csrf = self.header_csrf or ""
+
         return {
-            'Content-Type': 'application/json',
-            'Accept': '*/*',
-            'Authorization': self.header_authorization,
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Host': 'api.twitter.com',
-            'Origin': 'https://twitter.com',
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
-            'Referer': 'https://twitter.com/',
-            'Connection': 'keep-alive',
-            'Cookie': self.header_cookie,
-            'x-twitter-active-user': 'yes',
-            'x-twitter-client-language': 'en',
-            'x-csrf-token': self.header_csrf,
-            'x-twitter-auth-type': 'OAuth2Session'
+            "Content-Type": "application/json",
+            "Accept": "*/*",
+            "Authorization": authorization,
+            "Accept-Language": "en-US,en;q=0.9",
+            "Host": "api.twitter.com",
+            "Origin": "https://twitter.com",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15",
+            "Referer": "https://twitter.com/",
+            "Connection": "keep-alive",
+            "Cookie": cookie,
+            "x-twitter-active-user": "yes",
+            "x-twitter-client-language": "en",
+            "x-csrf-token": csrf,
+            "x-twitter-auth-type": "OAuth2Session",
         }
 
     def likes_request_features_data(self) -> Dict[str, Any]:
@@ -226,15 +260,18 @@ class TweetDownloader:
             "tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled": False,
             "interactive_text_enabled": True,
             "responsive_web_text_conversations_enabled": False,
-            "responsive_web_enhance_cards_enabled": False
+            "responsive_web_enhance_cards_enabled": False,
         }
 
 
 def main():
     downloader = TweetDownloader()
-    print(f'Starting retrieval of likes for Twitter user {downloader.twitter_user_id}...')
+    print(
+        f"Starting retrieval of likes for Twitter user {downloader.twitter_user_id}..."
+    )
     downloader.retrieve_all_likes()
-    print(f'Done. Likes JSON saved to: {OUTPUT_FILE}')
+    print(f"Done. Likes JSON saved to: {OUTPUT_FILE}")
+
 
 if __name__ == "__main__":
     main()
