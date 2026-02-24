@@ -15,8 +15,9 @@ from urllib.parse import unquote, urlparse
 
 import websockets
 
-import download_tweets
-import parse_media
+import app.download_tweets as download_tweets
+import app.parse_media as parse_media
+from app.paths import OUTPUT_DIR, SRC_DIR
 
 # ==== Logging ====
 logging.basicConfig(
@@ -34,8 +35,7 @@ REFRESH_PATH = "/refresh"
 DATA_ENDPOINT = "data.json"
 OPEN_BROWSER = True
 
-STATIC_DIR = Path("src")
-OUTPUT_DIR = Path("output")
+STATIC_DIR = SRC_DIR
 LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
 DATA_FILE = OUTPUT_DIR / "data.json"
 IMAGES_DIR = OUTPUT_DIR / "images"
@@ -304,7 +304,3 @@ def main() -> None:
         asyncio.run(start_ws())
     except KeyboardInterrupt:
         LOG.info("Interrupted. Exiting.")
-
-
-if __name__ == "__main__":
-    main()

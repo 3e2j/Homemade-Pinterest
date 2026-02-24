@@ -13,6 +13,29 @@ You can choose to download all images, caching them locally - or receive them di
 - **Automatic media download:** Saves tweet images and user avatars for offline access.
 - **Privacy blur:** For detected sensitive media.
 
+## Project Structure
+
+```
+homemade-pinterest/
+├── .env                           # Environment variables (not included in repo)
+├── config.json                    # Application configuration
+├── requirements.txt               # Python dependencies
+├── run_server.py                  # Main server entry point
+├── README.md                      # This file
+├── app/
+│   ├── download_tweets.py         # Tweet download logic
+│   ├── gallery_server.py          # Flask server for gallery
+│   ├── parse_media.py             # Media parsing and handling
+│   ├── paths.py                   # Path utilities
+│   └── tweet_parser.py            # Tweet parsing logic
+├── assets/
+│   └── heart_icon.svg             # Icon for desktop shortcuts
+└── src/
+    ├── index.html                 # Main HTML page
+    ├── script.js                  # Frontend JavaScript
+    └── style.css                  # Frontend styling
+```
+
 ## Important Notes
 - Never share your credentials. They are only used to authenticate to Twitter / X.
 - Leaving `DOWNLOAD_IMAGES` set to `true` reduces repeated remote fetches and lowers rate‑limit risk.
@@ -65,7 +88,7 @@ Edit `config.json`:
 ### 4. Run
 Launch the server:
 ```bash
-python gallery_server.py
+python run_server.py
 ```
 A browser tab will open at:
 ```

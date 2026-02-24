@@ -6,13 +6,12 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
-from tweet_parser import TweetParser
+from app.paths import OUTPUT_DIR
+from app.tweet_parser import TweetParser
 
 # Load environment variables from .env file
 load_dotenv()
 
-CONFIG_FILE = Path("config.json")
-OUTPUT_DIR = Path("output")
 OUTPUT_FILE = OUTPUT_DIR / "liked_tweets.json"
 
 # ---- Constants ----

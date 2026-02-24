@@ -1,16 +1,3 @@
-"""parse_media.py
-==================
-
-Minimal helpers to download, normalize, and deduplicate tweet media.
-
-Outputs: files under ``output/images`` and a compact ``output/data.json``.
-
-Key decisions:
-- Filenames = MD5(URL) for determinism.
-- Convert common rasters (.jpg/.png) to .webp to reduce disk usage.
-- Maintain two small on-disk caches: file-hash->filename and url->filename.
-"""
-
 import json
 import os
 import sys
@@ -24,9 +11,9 @@ from urllib.parse import urlparse
 import requests
 from PIL import Image
 
+from app.paths import CONFIG_FILE, OUTPUT_DIR
+
 # --- Configuration ---
-CONFIG_FILE = "config.json"
-OUTPUT_DIR = Path("output")
 JSON_FILE = OUTPUT_DIR / "liked_tweets.json"
 MEDIA_DIR = OUTPUT_DIR / "images/media"
 AVATAR_DIR = OUTPUT_DIR / "images/avatars"
