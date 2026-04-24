@@ -289,19 +289,20 @@ def download_single_file(
 
     if hash_cache is not None:
         file_hash = compute_file_hash(final_path)
-        with SHARED_LOCK:
-            if file_hash in hash_cache:
-                try:
-                    # Duplicate content: remove this copy and point to existing file
-                    final_path.unlink()
-                    existing_name = hash_cache[file_hash]
-                    if isinstance(known_duplicates, dict):
-                        known_duplicates[url] = existing_name
-                    return existing_name
-                except Exception as e:
-                    print(f"[Duplicate] Failed to remove {final_path.name}: {e}")
-            else:
-                hash_cache[file_hash] = final_path.name
+        if file_hash:
+            with SHARED_LOCK:
+                if file_hash in hash_cache:
+                    try:
+                        # Duplicate content: remove this copy and point to existing file
+                        final_path.unlink()
+                        existing_name = hash_cache[file_hash]
+                        if isinstance(known_duplicates, dict):
+                            known_duplicates[url] = existing_name
+                        return existing_name
+                    except Exception as e:
+                        print(f"[Duplicate] Failed to remove {final_path.name}: {e}")
+                else:
+                    hash_cache[file_hash] = final_path.name
 
     return final_path.name
 
