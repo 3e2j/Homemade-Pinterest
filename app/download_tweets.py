@@ -51,7 +51,7 @@ LIKES_VARIABLES_BASE = {
     "withClientEventToken": False,
     "withBirdwatchNotes": False,
     "withVoice": False,
-    "withV2Timeline": False,
+    "withV2Timeline": True,
 }
 
 LIKES_FEATURE_FLAGS = {

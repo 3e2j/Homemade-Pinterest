@@ -1,18 +1,35 @@
+VIDEO_MEDIA_TYPES = {"video", "animated_gif"}
+MP4_CONTENT_TYPE = "video/mp4"
+
+
 class TweetParser:
     def __init__(self, raw_tweet_json):
         self.is_valid_tweet = True
         self.raw_tweet_json = raw_tweet_json
         self._media_urls = None
+        self.key_data = {}
 
-        if not raw_tweet_json["content"].get("itemContent", None):
+        content = raw_tweet_json.get("content", {}) if isinstance(raw_tweet_json, dict) else {}
+        item_content = content.get("itemContent", {})
+        if not isinstance(item_content, dict):
             self.is_valid_tweet = False
             return
 
-        self.key_data = raw_tweet_json["content"]["itemContent"]["tweet_results"][
-            "result"
-        ]
-        if not self.key_data.get("legacy", None):
+        result = item_content.get("tweet_results", {}).get("result")
+        if not isinstance(result, dict):
             self.is_valid_tweet = False
+            return
+
+        # Some GraphQL responses wrap the tweet object under `result.tweet`.
+        if isinstance(result.get("tweet"), dict):
+            result = result["tweet"]
+
+        legacy = result.get("legacy")
+        if not isinstance(legacy, dict) or not legacy.get("id_str"):
+            self.is_valid_tweet = False
+            return
+
+        self.key_data = result
 
     def tweet_as_json(self):
         return {
@@ -27,37 +44,89 @@ class TweetParser:
 
     @property
     def tweet_id(self):
-        return self.key_data["legacy"]["id_str"]
+        return self.key_data.get("legacy", {}).get("id_str", "")
 
     @property
     def tweet_content(self):
-        return self.key_data["legacy"]["full_text"]
+        return self.key_data.get("legacy", {}).get("full_text", "")
 
     @property
     def user_handle(self):
-        return self.user_data["screen_name"]
+        return self.user_data.get("screen_name", "")
 
     @property
     def user_name(self):
-        return self.user_data["name"]
+        return self.user_data.get("name", "")
 
     @property
     def user_avatar_url(self):
-        return self.user_data["profile_image_url_https"]
+        return self.user_data.get("profile_image_url_https", "")
 
     @property
     def user_data(self):
-        return self.key_data["core"]["user_results"]["result"]["legacy"]
+        core = self.key_data.get("core", {})
+        user_results = core.get("user_results", {}) if isinstance(core, dict) else {}
+        result = (
+            user_results.get("result", {}) if isinstance(user_results, dict) else {}
+        )
+        legacy = result.get("legacy", {}) if isinstance(result, dict) else {}
+        return legacy if isinstance(legacy, dict) else {}
+
+    def _best_video_variant_url(self, media_entry):
+        video_info = media_entry.get("video_info", {})
+        variants = video_info.get("variants", []) if isinstance(video_info, dict) else []
+
+        best_url = None
+        best_bitrate = -1
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            if variant.get("content_type") != MP4_CONTENT_TYPE:
+                continue
+            url = variant.get("url")
+            if not isinstance(url, str) or not url:
+                continue
+            bitrate = variant.get("bitrate", 0)
+            if isinstance(bitrate, int) and bitrate > best_bitrate:
+                best_bitrate = bitrate
+                best_url = url
+
+        return best_url
+
+    def _extract_media_url(self, media_entry):
+        media_type = media_entry.get("type")
+        if media_type in VIDEO_MEDIA_TYPES:
+            video_url = self._best_video_variant_url(media_entry)
+            if video_url:
+                return video_url
+        media_url = media_entry.get("media_url_https")
+        if isinstance(media_url, str) and media_url:
+            return media_url
+        expanded_url = media_entry.get("expanded_url")
+        if isinstance(expanded_url, str) and expanded_url:
+            return expanded_url
+        return None
 
     @property
     def media_urls(self):
         if self._media_urls is None:
             self._media_urls = []
-            media_entries = self.key_data["legacy"]["entities"].get("media", [])
+            entities = self.key_data.get("legacy", {}).get("extended_entities", {})
+            if not isinstance(entities, dict):
+                entities = self.key_data.get("legacy", {}).get("entities", {})
+            media_entries = entities.get("media", []) if isinstance(entities, dict) else []
             for entry in media_entries:
-                self._media_urls.append(entry["media_url_https"])
+                if not isinstance(entry, dict):
+                    continue
+                media_url = self._extract_media_url(entry)
+                if media_url:
+                    self._media_urls.append(media_url)
         return self._media_urls
 
     @property
     def possibly_sensitive(self):
-        return self.user_data["possibly_sensitive"]
+        legacy_sensitive = self.key_data.get("legacy", {}).get("possibly_sensitive")
+        if isinstance(legacy_sensitive, bool):
+            return legacy_sensitive
+        user_sensitive = self.user_data.get("possibly_sensitive")
+        return bool(user_sensitive) if user_sensitive is not None else False

@@ -15,13 +15,15 @@ from app.paths import CONFIG_FILE, OUTPUT_DIR
 
 # --- Configuration ---
 JSON_FILE = OUTPUT_DIR / "liked_tweets.json"
-MEDIA_DIR = OUTPUT_DIR / "images/media"
-AVATAR_DIR = OUTPUT_DIR / "images/avatars"
+MEDIA_ROOT_DIR = OUTPUT_DIR / "media"
+IMAGE_DIR = MEDIA_ROOT_DIR / "images"
+VIDEO_DIR = MEDIA_ROOT_DIR / "videos"
+AVATAR_DIR = MEDIA_ROOT_DIR / "avatars"
 MEDIA_HASH_CACHE = OUTPUT_DIR / ".media_hashes.json"
 DUPLICATE_URLS_FILE = OUTPUT_DIR / ".duplicate_urls.json"
 PROCESSED_JSON = OUTPUT_DIR / "data.json"
 
-for folder in (MEDIA_DIR, AVATAR_DIR):
+for folder in (IMAGE_DIR, VIDEO_DIR, AVATAR_DIR):
     # Create output directories up-front so code can assume they exist.
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +39,7 @@ DOWNLOAD_IMAGES = config.get("DOWNLOAD_IMAGES", True)
 # --- Constants ---
 # Extensions we convert to WebP (others are preserved as-is).
 CONVERT_EXTS = {".jpg", ".jpeg", ".png"}
+VIDEO_EXTS = {".mp4", ".webm", ".mov"}
 
 # Tuning: quality, timeouts and IO chunk sizes
 WEBP_QUALITY = 60
@@ -107,6 +110,37 @@ def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
         return filepath
 
 
+def path_to_output_rel(filepath: Path) -> str:
+    return filepath.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+
+
+def resolve_mapped_path(mapped: str) -> Optional[Path]:
+    if not mapped:
+        return None
+
+    mapped_path = Path(mapped)
+    if mapped_path.is_absolute():
+        return mapped_path if mapped_path.exists() else None
+
+    # New format stores output-relative paths like media/images/a.webp.
+    direct = (OUTPUT_DIR / mapped_path).resolve()
+    if direct.exists():
+        return direct
+
+    # Backward compatibility for old caches that stored filename only.
+    for folder in (IMAGE_DIR, VIDEO_DIR, AVATAR_DIR):
+        candidate = folder / mapped
+        if candidate.exists():
+            return candidate
+
+    return None
+
+
+def media_target_folder(url: str) -> Path:
+    ext = Path(urlparse(url).path).suffix.lower()
+    return VIDEO_DIR if ext in VIDEO_EXTS else IMAGE_DIR
+
+
 # --- Filename Canonicalization ---
 def canonical_media_filename(url: str) -> str:
     """Deterministic filename for a media URL (MD5 of URL).
@@ -117,7 +151,9 @@ def canonical_media_filename(url: str) -> str:
         return ""
     ext = Path(urlparse(url).path).suffix.lower()
     h = md5(url.encode()).hexdigest()
-    return f"{h}.webp" if ext in CONVERT_EXTS else f"{h}{ext}"
+    if ext in CONVERT_EXTS:
+        return f"{h}.webp"
+    return f"{h}{ext}"
 
 
 # --- Hash & Duplicate Management ---
@@ -150,6 +186,15 @@ def full_cleanup() -> None:
     if not DOWNLOAD_IMAGES:
         return
 
+    known_url_map = load_duplicate_urls()
+
+    def referenced_filename(url: str, folder: Optional[Path] = None) -> str:
+        mapped = known_url_map.get(url)
+        if isinstance(mapped, str) and mapped:
+            return mapped
+        target_folder = folder or media_target_folder(url)
+        return path_to_output_rel(target_folder / canonical_media_filename(url))
+
     # Build referenced filenames set from JSON (if available)
     referenced_files = set()
     if JSON_FILE.exists():
@@ -159,19 +204,20 @@ def full_cleanup() -> None:
             for t in tweets:
                 av = t.get("user_avatar_url")
                 if av:
-                    referenced_files.add(canonical_media_filename(av))
+                    referenced_files.add(referenced_filename(av, AVATAR_DIR))
                 for url in t.get("tweet_media_urls", [])[:MAX_MEDIA_PER_TWEET]:
-                    referenced_files.add(canonical_media_filename(url))
+                    referenced_files.add(referenced_filename(url))
         except Exception as e:
             print(f"[UnreferencedFiles] Failed to compute referenced media: {e}")
 
     # First pass: remove files not referenced by the tweets JSON (if available)
     orphans_removed = 0
-    for folder in (MEDIA_DIR, AVATAR_DIR):
+    for folder in (IMAGE_DIR, VIDEO_DIR, AVATAR_DIR):
         for file_path in list(folder.iterdir()):
             if not file_path.is_file():
                 continue
-            if referenced_files and file_path.name not in referenced_files:
+            rel_path = path_to_output_rel(file_path)
+            if referenced_files and rel_path not in referenced_files:
                 try:
                     file_path.unlink()
                     orphans_removed += 1
@@ -187,7 +233,7 @@ def full_cleanup() -> None:
     duplicates_removed = 0
     removed_to_kept = {}  # map removed filename -> kept filename
 
-    for folder in (MEDIA_DIR, AVATAR_DIR):
+    for folder in (IMAGE_DIR, VIDEO_DIR, AVATAR_DIR):
         for file_path in list(folder.iterdir()):
             if not file_path.is_file():
                 continue
@@ -201,7 +247,7 @@ def full_cleanup() -> None:
                 # duplicate content -> remove this file and map to the canonical name
                 kept_name = seen_hashes[file_hash]
                 try:
-                    removed_name = file_path.name
+                    removed_name = path_to_output_rel(file_path)
                     file_path.unlink()
                     duplicates_removed += 1
                     removed_to_kept[removed_name] = kept_name
@@ -209,11 +255,14 @@ def full_cleanup() -> None:
                         f"[Duplicate] Removed {removed_name} (duplicate of {kept_name})"
                     )
                 except Exception as e:
-                    print(f"[Duplicate] Failed to remove {file_path.name}: {e}")
+                    print(
+                        f"[Duplicate] Failed to remove {path_to_output_rel(file_path)}: {e}"
+                    )
                 continue
             # unique file
-            seen_hashes[file_hash] = file_path.name
-            hash_map[file_hash] = file_path.name
+            rel_name = path_to_output_rel(file_path)
+            seen_hashes[file_hash] = rel_name
+            hash_map[file_hash] = rel_name
 
     save_hash_cache(hash_map)
     if duplicates_removed:
@@ -228,9 +277,7 @@ def full_cleanup() -> None:
             dup_map[url] = removed_to_kept[mapped]
             changed = True
         # If mapped no longer exists on disk, drop the mapping
-        elif mapped and not (
-            (MEDIA_DIR / mapped).exists() or (AVATAR_DIR / mapped).exists()
-        ):
+        elif mapped and not resolve_mapped_path(mapped):
             del dup_map[url]
             changed = True
 
@@ -260,8 +307,9 @@ def download_single_file(
     # Fast-path: if another thread already recorded this URL, return it.
     if isinstance(known_duplicates, dict):
         with SHARED_LOCK:
-            if known_duplicates.get(url):
-                return known_duplicates[url]
+            mapped = known_duplicates.get(url)
+            if isinstance(mapped, str) and resolve_mapped_path(mapped):
+                return mapped
 
     final_name = canonical_media_filename(url)
     ext = Path(urlparse(url).path).suffix
@@ -269,7 +317,11 @@ def download_single_file(
     final_path = folder / final_name
 
     if final_path.exists():
-        return final_name
+        final_rel = path_to_output_rel(final_path)
+        if isinstance(known_duplicates, dict):
+            with SHARED_LOCK:
+                known_duplicates[url] = final_rel
+        return final_rel
 
     original_path = folder / f"{hashed_name}{ext}"
     try:
@@ -287,24 +339,35 @@ def download_single_file(
     if convert and original_path.suffix.lower() in CONVERT_EXTS:
         final_path = convert_to_webp(original_path)
 
+    final_rel = path_to_output_rel(final_path)
+
     if hash_cache is not None:
         file_hash = compute_file_hash(final_path)
         if file_hash:
             with SHARED_LOCK:
                 if file_hash in hash_cache:
+                    existing_name = hash_cache[file_hash]
+                    existing_path = resolve_mapped_path(existing_name)
+                    if not existing_path:
+                        hash_cache[file_hash] = final_rel
+                        existing_name = final_rel
                     try:
                         # Duplicate content: remove this copy and point to existing file
-                        final_path.unlink()
-                        existing_name = hash_cache[file_hash]
+                        if final_path.exists() and existing_name != final_rel:
+                            final_path.unlink()
                         if isinstance(known_duplicates, dict):
                             known_duplicates[url] = existing_name
                         return existing_name
                     except Exception as e:
                         print(f"[Duplicate] Failed to remove {final_path.name}: {e}")
                 else:
-                    hash_cache[file_hash] = final_path.name
+                    hash_cache[file_hash] = final_rel
 
-    return final_path.name
+    if isinstance(known_duplicates, dict):
+        with SHARED_LOCK:
+            known_duplicates[url] = final_rel
+
+    return final_rel
 
 
 def download_bulk_media(
@@ -375,7 +438,9 @@ def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if DOWNLOAD_IMAGES:
             if avatar_url:
                 all_url_pairs.append((avatar_url, AVATAR_DIR))
-            all_url_pairs.extend([(url, MEDIA_DIR) for url in media_urls])
+            all_url_pairs.extend(
+                [(url, media_target_folder(url)) for url in media_urls]
+            )
 
     downloaded_map: Dict[str, Optional[str]] = {}
     if DOWNLOAD_IMAGES and all_url_pairs:
@@ -401,7 +466,10 @@ def process_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "handle": tweet.get("user_handle", ""),
                 "content": tweet.get("tweet_content", ""),
                 "media": media_names,
-                "is_video": any("video_thumb" in url for url in media_urls),
+                "is_video": any(
+                    Path(str(name_or_url)).suffix.lower() in VIDEO_EXTS
+                    for name_or_url in media_names
+                ),
                 "possibly_sensitive": tweet.get("possibly_sensitive", ""),
             }
         )

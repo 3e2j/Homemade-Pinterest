@@ -1,8 +1,8 @@
 // ==== Constants ====
 const BATCH_SIZE = 100;
-const MEDIA_DIR = "images/media";
-const AVATAR_DIR = "images/avatars";
-const DATA_FILE = "data.json";  // keep name
+const MEDIA_IMAGES_DIR = "media/images";
+const AVATAR_DIR = "media/avatars";
+const DATA_FILE = "data.json"; // keep name
 const STYLE_FILE = "style.css";
 const WS_PORT = 8765;
 const MEDIA_MARGIN = 10;
@@ -14,6 +14,7 @@ const SCROLL_ROOT_MARGIN = "1000px";
 const WS_PING_INTERVAL_MS = 5000;
 const SAME_ASPECT_TOLERANCE = 0.01;
 const WIDE_IMAGE_THRESHOLD = 1.2;
+const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov"];
 
 // ==== State ====
 let tweets = [];
@@ -24,14 +25,26 @@ function getMediaSrc(media) {
   if (typeof media === "string" && media.includes("://")) {
     return media;
   }
-  return `${MEDIA_DIR}/${media}`;
+  if (typeof media === "string" && media.includes("/")) {
+    return media;
+  }
+  return `${MEDIA_IMAGES_DIR}/${media}`;
 }
 
 function getAvatarSrc(avatar) {
   if (typeof avatar === "string" && avatar.startsWith("http")) {
     return avatar;
   }
+  if (typeof avatar === "string" && avatar.includes("/")) {
+    return avatar;
+  }
   return `${AVATAR_DIR}/${avatar}`;
+}
+
+function isVideoMedia(media) {
+  if (typeof media !== "string") return false;
+  const lower = media.toLowerCase();
+  return VIDEO_EXTENSIONS.some((ext) => lower.includes(ext));
 }
 
 // ==== Masonry Layout ====
@@ -45,7 +58,9 @@ function layoutMasonry(container) {
   const cards = Array.from(container.children);
 
   for (const card of cards) {
-    const span = card.classList.contains("multiple-media") ? Math.min(2, columns) : 1;
+    const span = card.classList.contains("multiple-media")
+      ? Math.min(2, columns)
+      : 1;
     const width = cardWidth * span + gutter * (span - 1);
 
     let minY = Infinity;
@@ -109,7 +124,7 @@ async function createCard(tweet) {
 
   const content = document.createElement("div");
   content.className = "content";
-  content.textContent = tweet.content.replace(/https?:\/\/\S+$/, '').trim();
+  content.textContent = tweet.content.replace(/https?:\/\/\S+$/, "").trim();
   if (content.textContent) info.appendChild(content);
 
   link.appendChild(info);
@@ -122,11 +137,15 @@ async function createCard(tweet) {
     hideBtn.className = "hide-button";
     hideBtn.textContent = "Hide";
     hideBtn.style.display = "none";
-    hideBtn.addEventListener("click", e => {
+    hideBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      card.querySelectorAll(".media-wrap img").forEach(img => img.classList.add("blurred"));
-      card.querySelectorAll(".blurred-icon").forEach(icon => icon.style.display = "block");
+      card
+        .querySelectorAll(".media-wrap .media-content")
+        .forEach((el) => el.classList.add("blurred"));
+      card
+        .querySelectorAll(".blurred-icon")
+        .forEach((icon) => (icon.style.display = "block"));
       hideBtn.style.display = "none";
     });
     card.appendChild(hideBtn);
@@ -138,22 +157,20 @@ async function createCard(tweet) {
     wrap.href = getMediaSrc(src);
     wrap.className = "media-wrap crop-to-ratio";
     wrap.target = "_blank";
-
-    const img = document.createElement("img");
-    img.src = getMediaSrc(src);
-    if (isSensitive) img.classList.add("blurred");
-    wrap.appendChild(img);
-
-    if (tweet.is_video) {
-      const icon = document.createElement("div");
-      icon.className = "video-indicator";
-      icon.innerHTML = `
-        <svg width="24" height="24" viewBox="0 0 16 16" fill="white">
-          <path d="M10 3H0V13H10V3Z"/>
-          <path d="M15 3L12 6V10L15 13H16V3H15Z"/>
-        </svg>`;
-      wrap.appendChild(icon);
+    const mediaSrc = getMediaSrc(src);
+    const mediaEl = isVideoMedia(src)
+      ? document.createElement("video")
+      : document.createElement("img");
+    mediaEl.className = "media-content";
+    mediaEl.src = mediaSrc;
+    if (mediaEl.tagName === "VIDEO") {
+      mediaEl.autoplay = true;
+      mediaEl.loop = true;
+      mediaEl.muted = true;
+      mediaEl.playsInline = true;
     }
+    if (isSensitive) mediaEl.classList.add("blurred");
+    wrap.appendChild(mediaEl);
 
     if (isSensitive) {
       const eyeIcon = document.createElement("div");
@@ -166,20 +183,26 @@ async function createCard(tweet) {
 
       let wasBlurredAtMouseDown = false;
       wrap.addEventListener("mousedown", () => {
-        wasBlurredAtMouseDown = img.classList.contains("blurred");
+        wasBlurredAtMouseDown = mediaEl.classList.contains("blurred");
       });
       wrap.addEventListener("click", (e) => {
         if (wasBlurredAtMouseDown) {
           e.preventDefault();
-          card.querySelectorAll(".media-wrap img").forEach(i => i.classList.remove("blurred"));
-          card.querySelectorAll(".blurred-icon").forEach(icon => icon.style.display = "none");
+          card
+            .querySelectorAll(".media-wrap .media-content")
+            .forEach((i) => i.classList.remove("blurred"));
+          card
+            .querySelectorAll(".blurred-icon")
+            .forEach((icon) => (icon.style.display = "none"));
           if (hideBtn) hideBtn.style.display = "block";
         }
       });
     }
     if (isSensitive) {
       card.addEventListener("mouseenter", () => {
-        const anyUnblurred = [...card.querySelectorAll(".media-wrap img")].some(i => !i.classList.contains("blurred"));
+        const anyUnblurred = [
+          ...card.querySelectorAll(".media-wrap .media-content"),
+        ].some((i) => !i.classList.contains("blurred"));
         if (anyUnblurred && hideBtn) hideBtn.style.display = "block";
       });
       card.addEventListener("mouseleave", () => {
@@ -194,18 +217,31 @@ async function createCard(tweet) {
   let allSameAspectRatio = true;
 
   if (tweet.media.length > 1) {
-    imageRatios = await Promise.all(tweet.media.map(src => {
-      return new Promise(resolve => {
-        const img = new Image();
-        img.onload = () => resolve(img.naturalWidth / img.naturalHeight);
-        img.onerror = () => resolve(null);
-        img.src = getMediaSrc(src);
-      });
-    }));
+    imageRatios = await Promise.all(
+      tweet.media.map((src) => {
+        return new Promise((resolve) => {
+          if (isVideoMedia(src)) {
+            const video = document.createElement("video");
+            video.preload = "metadata";
+            video.onloadedmetadata = () =>
+              resolve(video.videoWidth / video.videoHeight);
+            video.onerror = () => resolve(null);
+            video.src = getMediaSrc(src);
+            return;
+          }
+          const img = new Image();
+          img.onload = () => resolve(img.naturalWidth / img.naturalHeight);
+          img.onerror = () => resolve(null);
+          img.src = getMediaSrc(src);
+        });
+      }),
+    );
 
-    const validRatios = imageRatios.filter(r => r !== null);
+    const validRatios = imageRatios.filter((r) => r !== null);
     const firstRatio = validRatios[0];
-  allSameAspectRatio = validRatios.every(r => Math.abs(r - firstRatio) < SAME_ASPECT_TOLERANCE);
+    allSameAspectRatio = validRatios.every(
+      (r) => Math.abs(r - firstRatio) < SAME_ASPECT_TOLERANCE,
+    );
   }
 
   // Media rendering
@@ -216,7 +252,8 @@ async function createCard(tweet) {
     grid.className = "media-grid";
 
     if (tweet.media.length === 3) {
-  const firstIsWide = imageRatios[0] && imageRatios[0] > WIDE_IMAGE_THRESHOLD;
+      const firstIsWide =
+        imageRatios[0] && imageRatios[0] > WIDE_IMAGE_THRESHOLD;
 
       if (firstIsWide) {
         grid.classList.add("three-wide-top");
@@ -293,19 +330,34 @@ async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
     grid.appendChild(fragment);
   }
 
-  const images = cards.flatMap(card => Array.from(card.querySelectorAll("img")));
+  const mediaElements = cards.flatMap((card) =>
+    Array.from(card.querySelectorAll(".media-content")),
+  );
   const reveal = () => {
     requestAnimationFrame(() => {
       layoutMasonry(grid);
-      cards.forEach(card => { card.style.visibility = "visible"; });
+      cards.forEach((card) => {
+        card.style.visibility = "visible";
+      });
     });
   };
-  if (!images.length) {
+  if (!mediaElements.length) {
     reveal();
   } else {
     let done = 0;
-    const check = () => { if (++done === images.length) reveal(); };
-    images.forEach(img => (img.complete ? check() : (img.onload = img.onerror = check)));
+    const check = () => {
+      if (++done === mediaElements.length) reveal();
+    };
+    mediaElements.forEach((el) => {
+      if (el.tagName === "VIDEO") {
+        if (el.readyState >= 2) check();
+        else el.onloadeddata = el.onerror = check;
+      } else if (el.complete) {
+        check();
+      } else {
+        el.onload = el.onerror = check;
+      }
+    });
   }
   return cards;
 }
@@ -322,11 +374,17 @@ function setupLazyLoad() {
   sentinel.style.height = "1px";
   document.body.appendChild(sentinel);
 
-  const observer = new IntersectionObserver(entries => {
-    if (entries.some(e => e.isIntersecting) && loadedCount < tweets.length) {
-      loadMoreTweets();
-    }
-  }, { rootMargin: SCROLL_ROOT_MARGIN });
+  const observer = new IntersectionObserver(
+    (entries) => {
+      if (
+        entries.some((e) => e.isIntersecting) &&
+        loadedCount < tweets.length
+      ) {
+        loadMoreTweets();
+      }
+    },
+    { rootMargin: SCROLL_ROOT_MARGIN },
+  );
 
   observer.observe(sentinel);
 }
@@ -340,7 +398,7 @@ function setupWebSocketPing() {
       if (socket.readyState === WebSocket.OPEN) {
         socket.send("ping");
       }
-  }, WS_PING_INTERVAL_MS);
+    }, WS_PING_INTERVAL_MS);
   };
 
   socket.onmessage = (event) => {
@@ -379,9 +437,14 @@ async function prependNewTweets(newTweets) {
 }
 
 // ==== Event Listeners ====
-window.addEventListener("resize", () => layoutMasonry(document.getElementById("grid")));
+window.addEventListener("resize", () =>
+  layoutMasonry(document.getElementById("grid")),
+);
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Start WebSocket connection immediately so server knows client is active
+  setupWebSocketPing();
+
   try {
     tweets = await fetchTweetsData();
   } catch (e) {
@@ -395,13 +458,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     } catch (e) {
       console.error("Failed to refresh tweets:", e);
       const grid = document.getElementById("grid");
-      if (grid) grid.innerHTML = "<p>Error loading tweets. Please try again later.</p>";
+      if (grid)
+        grid.innerHTML = "<p>Error loading tweets. Please try again later.</p>";
       return;
     }
   }
 
   setupLazyLoad();
-  setupWebSocketPing();
 });
 
 document.getElementById("refresh-btn").addEventListener("click", async () => {
@@ -414,15 +477,17 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
     if (data.updated) {
       try {
         const fresh = await fetchTweetsData();
-        const existingIds = new Set(tweets.map(t => t.id || t.tweet_id));
-        const freshIds = new Set(fresh.map(t => t.id || t.tweet_id));
-        const newOnes = fresh.filter(t => !existingIds.has(t.id || t.tweet_id));
-        const removedIds = [...existingIds].filter(id => !freshIds.has(id));
+        const existingIds = new Set(tweets.map((t) => t.id || t.tweet_id));
+        const freshIds = new Set(fresh.map((t) => t.id || t.tweet_id));
+        const newOnes = fresh.filter(
+          (t) => !existingIds.has(t.id || t.tweet_id),
+        );
+        const removedIds = [...existingIds].filter((id) => !freshIds.has(id));
 
         // Remove deleted tweets' cards
         if (removedIds.length) {
           const grid = document.getElementById("grid");
-          removedIds.forEach(id => {
+          removedIds.forEach((id) => {
             const el = grid.querySelector(`.card[data-tweet-id="${id}"]`);
             if (el) el.remove();
           });
@@ -434,8 +499,8 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
           await prependNewTweets(newOnes);
         } else if (removedIds.length) {
           // Re-layout after removals only
-            const grid = document.getElementById("grid");
-            layoutMasonry(grid);
+          const grid = document.getElementById("grid");
+          layoutMasonry(grid);
         }
 
         // Recompute loadedCount based on number of cards currently rendered
@@ -444,10 +509,16 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
 
         if (newOnes.length || removedIds.length) {
           btn.textContent = "Updated";
-          setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 1500);
+          setTimeout(() => {
+            btn.textContent = "🔄 Refresh";
+            btn.disabled = false;
+          }, 1500);
         } else {
           btn.textContent = "No changes";
-          setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 1500);
+          setTimeout(() => {
+            btn.textContent = "🔄 Refresh";
+            btn.disabled = false;
+          }, 1500);
         }
       } catch (e) {
         console.error("Failed to fetch updated data.json:", e);
@@ -455,10 +526,16 @@ document.getElementById("refresh-btn").addEventListener("click", async () => {
       }
     } else {
       btn.textContent = "No changes";
-      setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 1500);
+      setTimeout(() => {
+        btn.textContent = "🔄 Refresh";
+        btn.disabled = false;
+      }, 1500);
     }
   } catch (e) {
     btn.textContent = "Error!";
-    setTimeout(() => { btn.textContent = "🔄 Refresh"; btn.disabled = false; }, 2000);
+    setTimeout(() => {
+      btn.textContent = "🔄 Refresh";
+      btn.disabled = false;
+    }, 2000);
   }
 });

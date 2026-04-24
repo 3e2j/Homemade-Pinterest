@@ -38,7 +38,6 @@ OPEN_BROWSER = True
 STATIC_DIR = SRC_DIR
 LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
 DATA_FILE = OUTPUT_DIR / "data.json"
-IMAGES_DIR = OUTPUT_DIR / "images"
 
 clients: Dict[Any, float] = {}
 
