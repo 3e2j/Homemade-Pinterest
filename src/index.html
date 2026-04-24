@@ -1,20 +1,31 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Homemade Pinterest</title>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Homemade Pinterest</title>
 
-  <script>
-    document.write(`<link rel="stylesheet" href="style.css" />`);
-  </script>
-</head>
-<body>
-  <button id="refresh-btn" style="position:fixed;top:10px;right:10px;z-index:1000;">🔄 Refresh</button>
-  <div id="grid"></div>
+        <script>
+            document.write(`<link rel="stylesheet" href="style.css" />`);
+        </script>
+    </head>
+    <body>
+        <button
+            id="refresh-btn"
+            style="
+                position: fixed;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+                font-size: 16px;
+            "
+        >
+            🔄 Refresh
+        </button>
+        <div id="grid"></div>
 
-  <script>
-    document.write(`<script src="script.js" defer><\/script>`);
-  </script>
-</body>
+        <script>
+            document.write(`<script src="script.js" defer><\/script>`);
+        </script>
+    </body>
 </html>

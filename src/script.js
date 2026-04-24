@@ -8,7 +8,7 @@ const WS_PORT = 8765;
 const MEDIA_MARGIN = 10;
 const HALF_MARGIN = MEDIA_MARGIN / 2;
 // Layout / timing constants
-const CARD_WIDTH = 220;
+const CARD_WIDTH = 300;
 const COLUMN_GUTTER = 8;
 const SCROLL_ROOT_MARGIN = "1000px";
 const WS_PING_INTERVAL_MS = 5000;
@@ -49,11 +49,29 @@ function isVideoMedia(media) {
 
 // ==== Masonry Layout ====
 function layoutMasonry(container) {
-  const cardWidth = CARD_WIDTH;
   const gutter = COLUMN_GUTTER;
-  const columns = Math.floor(container.clientWidth / (cardWidth + gutter));
-  if (columns < 1) return;
-
+  const padding = 8; // matches #grid padding in CSS
+  const minColumns = 2;
+  
+  const containerWidth = container.clientWidth;
+  const innerWidth = containerWidth - (padding * 2);
+  
+  // Find max columns that can fit without overflow
+  let columns = minColumns;
+  for (let c = minColumns; c <= Math.floor(innerWidth / CARD_WIDTH); c++) {
+    // Check if c columns fit: c cards + (c-1) gutters
+    const requiredWidth = c * CARD_WIDTH + (c - 1) * gutter;
+    if (requiredWidth <= innerWidth) {
+      columns = c;
+    } else {
+      break;
+    }
+  }
+  
+  // Scale card width to fill available space without gaps
+  const totalGutterWidth = gutter * (columns - 1);
+  const dynamicCardWidth = (innerWidth - totalGutterWidth) / columns;
+  
   const heights = new Array(columns).fill(0);
   const cards = Array.from(container.children);
 
@@ -61,7 +79,7 @@ function layoutMasonry(container) {
     const span = card.classList.contains("multiple-media")
       ? Math.min(2, columns)
       : 1;
-    const width = cardWidth * span + gutter * (span - 1);
+    const width = dynamicCardWidth * span + gutter * (span - 1);
 
     let minY = Infinity;
     let minX = 0;
@@ -73,7 +91,7 @@ function layoutMasonry(container) {
       }
     }
 
-    const x = minX * (cardWidth + gutter);
+    const x = padding + minX * (dynamicCardWidth + gutter);
     card.style.position = "absolute";
     card.style.width = `${width}px`;
     card.style.transform = `translate(${x}px, ${minY}px)`;
@@ -105,22 +123,33 @@ async function createCard(tweet) {
   const info = document.createElement("div");
   info.className = "info";
 
+  // Header row: avatar + stacked username/handle
+  const header = document.createElement("div");
+  header.className = "info-header";
+
   if (tweet.avatar) {
     const avatar = document.createElement("img");
     avatar.className = "avatar";
     avatar.src = getAvatarSrc(tweet.avatar);
-    info.appendChild(avatar);
+    header.appendChild(avatar);
   }
+
+  // Stack username and handle vertically
+  const textStack = document.createElement("div");
+  textStack.className = "text-stack";
 
   const name = document.createElement("span");
   name.className = "username";
   name.textContent = tweet.username;
-  info.appendChild(name);
+  textStack.appendChild(name);
 
   const handle = document.createElement("span");
   handle.className = "handle";
   handle.textContent = "@" + tweet.handle;
-  info.appendChild(handle);
+  textStack.appendChild(handle);
+
+  header.appendChild(textStack);
+  info.appendChild(header);
 
   const content = document.createElement("div");
   content.className = "content";
