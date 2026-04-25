@@ -5,14 +5,15 @@ import {
   addLoadedCount,
   getTweets,
   getLoadedCount,
-} from "./data/store.js";
-import { fetchTweetsData, prependNewTweets } from "./data/loader.js";
-import { createCard, waitForMediaLoad } from "./components/card.js";
-import { layoutMasonry } from "./layout/masonry.js";
-import { setupResizeListener } from "./layout/responsive.js";
-import { setupLazyLoad } from "./ui/lazy-load.js";
-import { setupRefreshButton } from "./ui/events.js";
-import { setupWebSocketPing } from "./ws/client.js";
+  DATA_FILE,
+  fetchTweetsData,
+  prependNewTweets,
+} from "./store/store.js";
+import { createCard, waitForMediaLoad } from "./components/tweet-card/card.js";
+import { setupResizeListener, layoutMasonry } from "./components/gallery/layout.js";
+import { setupLazyLoad } from "./interactions/scroll.js";
+import { setupRefreshButton } from "./interactions/refresh.js";
+import { setupWebSocketPing } from "./connectivity/websocket.js";
 
 export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
   if (!tweetsToInsert || !tweetsToInsert.length) return [];

@@ -84,27 +84,14 @@ def _deduplicate_by_content() -> tuple:
         for file_path in list(folder.iterdir()):
             if not file_path.is_file():
                 continue
-            try:
-                file_hash = compute_file_hash(file_path)
-            except Exception:
-                file_hash = ""
 
+            file_hash = compute_file_hash(file_path) if file_path.exists() else ""
             if not file_hash:
                 continue
 
             if file_hash in seen_hashes:
                 kept_name = seen_hashes[file_hash]
-                try:
-                    removed_name = path_to_output_rel(file_path)
-                    file_path.unlink()
-                    duplicates_removed += 1
-                    print(
-                        f"[Cleanup] Removed {removed_name} (duplicate of {kept_name})"
-                    )
-                except Exception as e:
-                    print(
-                        f"[Cleanup] Failed to remove {path_to_output_rel(file_path)}: {e}"
-                    )
+                duplicates_removed += _remove_duplicate_file(file_path, kept_name)
                 continue
 
             rel_name = path_to_output_rel(file_path)
@@ -112,6 +99,18 @@ def _deduplicate_by_content() -> tuple:
             hash_map[file_hash] = rel_name
 
     return duplicates_removed, hash_map
+
+
+def _remove_duplicate_file(file_path: Path, kept_name: str) -> int:
+    """Remove a duplicate file. Returns 1 if removed, 0 otherwise."""
+    try:
+        removed_name = path_to_output_rel(file_path)
+        file_path.unlink()
+        print(f"[Cleanup] Removed {removed_name} (duplicate of {kept_name})")
+        return 1
+    except Exception as e:
+        print(f"[Cleanup] Failed to remove {path_to_output_rel(file_path)}: {e}")
+        return 0
 
 
 def cleanup() -> None:

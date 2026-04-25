@@ -1,4 +1,4 @@
-import { AVATAR_DIR } from "../data/store.js";
+import { AVATAR_DIR } from "../../store/store.js";
 
 export function getAvatarSrc(avatar) {
   if (typeof avatar === "string" && avatar.startsWith("http")) {

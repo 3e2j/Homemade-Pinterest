@@ -1,6 +1,5 @@
-import { getTweets, setTweets, getLoadedCount, setLoadedCount } from "../data/store.js";
-import { fetchTweetsData, prependNewTweets } from "../data/loader.js";
-import { layoutMasonry } from "../layout/masonry.js";
+import { getTweets, setTweets, getLoadedCount, setLoadedCount, fetchTweetsData, prependNewTweets } from "../store/store.js";
+import { layoutMasonry } from "../components/gallery/layout.js";
 
 export function setupRefreshButton(insertTweetsFunc) {
   document.getElementById("refresh-btn").addEventListener("click", async () => {

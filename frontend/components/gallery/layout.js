@@ -1,4 +1,4 @@
-import { CARD_WIDTH, COLUMN_GUTTER } from "../data/store.js";
+import { CARD_WIDTH, COLUMN_GUTTER } from "../../store/store.js";
 
 export function layoutMasonry(container) {
   const gutter = COLUMN_GUTTER;
@@ -55,4 +55,10 @@ export function layoutMasonry(container) {
   }
 
   container.style.height = `${Math.max(...heights)}px`;
+}
+
+export function setupResizeListener() {
+  window.addEventListener("resize", () =>
+    layoutMasonry(document.getElementById("grid")),
+  );
 }

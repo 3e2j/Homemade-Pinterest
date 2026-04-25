@@ -1,5 +1,18 @@
-import { WS_PORT, WS_PING_INTERVAL_MS } from "../data/store.js";
-import { createPingMessage, createCloseMessage } from "./protocol.js";
+import { WS_PORT, WS_PING_INTERVAL_MS } from "../store/store.js";
+
+const MESSAGE_TYPES = {
+  PING: "ping",
+  PONG: "pong",
+  CLOSE: "close",
+};
+
+function createPingMessage() {
+  return MESSAGE_TYPES.PING;
+}
+
+function createCloseMessage() {
+  return MESSAGE_TYPES.CLOSE;
+}
 
 export function setupWebSocketPing() {
   const socket = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);

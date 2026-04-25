@@ -2,10 +2,10 @@
 
 from typing import Any, Dict, List, Set
 
-from backend.api.x_client import XAPIClient
-from backend.models import TweetParser
+from backend.tweets.downloader import XAPIClient
+from backend.tweets.parser import TweetParser
 from backend.paths import OUTPUT_DIR
-from backend.storage.cache import TweetCache
+from backend.tweets.cache import TweetCache
 
 LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
 JSON_INDENT = 2
@@ -55,15 +55,17 @@ class TweetDownloader:
                 tweet = tweet_parser.tweet_as_json()
                 tweet_id = tweet[TWEET_ID_KEY]
 
-                if tweet_id in existing_tweet_map:
-                    seen_streak += 1
-                    if seen_streak >= consecutive_seen_limit:
-                        print(
-                            f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping."
-                        )
-                        break
-                else:
+                if tweet_id not in existing_tweet_map:
                     seen_streak = 0
+                    fetched_tweets.append(tweet)
+                    continue
+
+                seen_streak += 1
+                if seen_streak >= consecutive_seen_limit:
+                    print(
+                        f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping."
+                    )
+                    break
 
                 fetched_tweets.append(tweet)
 

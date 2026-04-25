@@ -1,4 +1,4 @@
-import { MEDIA_IMAGES_DIR, VIDEO_EXTENSIONS } from "../data/store.js";
+import { MEDIA_IMAGES_DIR, VIDEO_EXTENSIONS } from "../../store/store.js";
 
 export function getMediaSrc(media) {
   if (typeof media === "string" && media.includes("://")) {

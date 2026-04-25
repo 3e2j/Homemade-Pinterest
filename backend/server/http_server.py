@@ -114,6 +114,17 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
         else:
             write_json_response(self, {"error": "not_found"}, 404)
 
+    def _get_new_tweet_list(self, new_ids: Set[str]) -> list:
+        """Extract new tweets from the cache that match new_ids."""
+        if not new_ids:
+            return []
+        
+        all_tweets = read_json(LIKED_TWEETS_FILE, [])
+        if not isinstance(all_tweets, list):
+            return []
+        
+        return [t for t in all_tweets if t.get("tweet_id") in new_ids]
+
     def handle_refresh(self) -> None:
         try:
             before_ids = self.get_tweet_ids()
@@ -121,18 +132,15 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
             download_tweets.main()
             after_fp = file_fingerprint(LIKED_TWEETS_FILE)
             file_updated = before_fp != after_fp
-            new_tweets_list = []
             new_ids: Set[str] = set()
+            
             if file_updated:
                 after_ids = self.get_tweet_ids()
                 new_ids = after_ids - before_ids
                 self.process_media(new_ids)
-                if new_ids:
-                    all_tweets = read_json(LIKED_TWEETS_FILE, [])
-                    if isinstance(all_tweets, list):
-                        new_tweets_list = [
-                            t for t in all_tweets if t.get("tweet_id") in new_ids
-                        ]
+            
+            new_tweets_list = self._get_new_tweet_list(new_ids)
+            
             write_json_response(
                 self,
                 {

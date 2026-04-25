@@ -1,3 +1,5 @@
+"""Tweet parsing: Extract structured data from X API responses."""
+
 VIDEO_MEDIA_TYPES = {"video", "animated_gif"}
 MP4_CONTENT_TYPE = "video/mp4"
 

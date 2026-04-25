@@ -1,4 +1,4 @@
-import { SCROLL_ROOT_MARGIN, getTweets, getLoadedCount } from "../data/store.js";
+import { SCROLL_ROOT_MARGIN, getTweets, getLoadedCount } from "../store/store.js";
 
 export function setupLazyLoad(loadMoreCallback) {
   const sentinel = document.createElement("div");

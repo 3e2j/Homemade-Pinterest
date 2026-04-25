@@ -1,9 +1,11 @@
+"""Media file downloader: Fetch and cache media files from URLs."""
+
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from hashlib import md5
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 import requests
@@ -202,3 +204,41 @@ def download_bulk_media(
     save_url_cache(url_cache)
     print("[Download] media download complete")
     return results
+
+
+def update_tweets_with_downloaded_media(tweets: List[Dict[str, Any]]) -> None:
+    """Download media files from URLs and update tweet records in-place.
+
+    Collects avatar and media URLs from tweets, downloads them via bulk
+    downloader, and updates tweet records with local file paths.
+    """
+    from backend.media.config import AVATAR_DIR, DOWNLOAD_IMAGES, MAX_MEDIA_PER_TWEET
+
+    if not DOWNLOAD_IMAGES:
+        return
+
+    url_folder_pairs: List[tuple] = []
+
+    # Collect all URLs to download
+    for tweet in tweets:
+        avatar_url = tweet.get("user_avatar_url", "")
+        if avatar_url:
+            url_folder_pairs.append((avatar_url, AVATAR_DIR))
+
+        for media_url in tweet.get("tweet_media_urls", [])[:MAX_MEDIA_PER_TWEET]:
+            if media_url:
+                url_folder_pairs.append((media_url, media_target_folder(media_url)))
+
+    # Download and map URLs to local files
+    download_results = download_bulk_media(url_folder_pairs)
+
+    # Update tweet records with local file paths
+    for tweet in tweets:
+        avatar_url = tweet.get("user_avatar_url", "")
+        if avatar_url and avatar_url in download_results:
+            tweet["user_avatar_url"] = download_results[avatar_url]
+
+        media_urls = tweet.get("tweet_media_urls", [])
+        tweet["tweet_media_urls"] = [
+            download_results.get(url, url) for url in media_urls if url
+        ]
