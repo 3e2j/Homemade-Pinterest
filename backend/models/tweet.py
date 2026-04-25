@@ -9,7 +9,11 @@ class TweetParser:
         self._media_urls = None
         self.key_data = {}
 
-        content = raw_tweet_json.get("content", {}) if isinstance(raw_tweet_json, dict) else {}
+        content = (
+            raw_tweet_json.get("content", {})
+            if isinstance(raw_tweet_json, dict)
+            else {}
+        )
         item_content = content.get("itemContent", {})
         if not isinstance(item_content, dict):
             self.is_valid_tweet = False
@@ -74,7 +78,9 @@ class TweetParser:
 
     def _best_video_variant_url(self, media_entry):
         video_info = media_entry.get("video_info", {})
-        variants = video_info.get("variants", []) if isinstance(video_info, dict) else []
+        variants = (
+            video_info.get("variants", []) if isinstance(video_info, dict) else []
+        )
 
         best_url = None
         best_bitrate = -1
@@ -93,18 +99,22 @@ class TweetParser:
 
         return best_url
 
+    # Remove query tags ("?" onwards)
+    def _strip_query(self, url: str) -> str:
+        return url.split("?")[0]
+
     def _extract_media_url(self, media_entry):
         media_type = media_entry.get("type")
         if media_type in VIDEO_MEDIA_TYPES:
             video_url = self._best_video_variant_url(media_entry)
             if video_url:
-                return video_url
+                return self._strip_query(video_url)
         media_url = media_entry.get("media_url_https")
         if isinstance(media_url, str) and media_url:
-            return media_url
+            return self._strip_query(media_url)
         expanded_url = media_entry.get("expanded_url")
         if isinstance(expanded_url, str) and expanded_url:
-            return expanded_url
+            return self._strip_query(expanded_url)
         return None
 
     @property
@@ -114,7 +124,9 @@ class TweetParser:
             entities = self.key_data.get("legacy", {}).get("extended_entities", {})
             if not isinstance(entities, dict):
                 entities = self.key_data.get("legacy", {}).get("entities", {})
-            media_entries = entities.get("media", []) if isinstance(entities, dict) else []
+            media_entries = (
+                entities.get("media", []) if isinstance(entities, dict) else []
+            )
             for entry in media_entries:
                 if not isinstance(entry, dict):
                     continue

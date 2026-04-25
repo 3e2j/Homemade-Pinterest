@@ -20,37 +20,39 @@ homemade-pinterest/
 ├── .env                           # Environment variables (not included in repo)
 ├── config.json                    # Application configuration
 ├── requirements.txt               # Python dependencies
-├── run_server.py                  # Main server entry point
-├── README.md                      # This file
-├── app/
-│   ├── download_tweets.py         # Tweet download logic
-│   ├── gallery_server.py          # Flask server for gallery
-│   ├── parse_media.py             # Media parsing and handling
-│   ├── paths.py                   # Path utilities
-│   └── tweet_parser.py            # Tweet parsing logic
-├── assets/
-│   └── heart_icon.svg             # Icon for desktop shortcuts
-└── src/
-    ├── index.html                 # Main HTML page
-    ├── script.js                  # Frontend JavaScript
-    └── style.css                  # Frontend styling
+├── start.sh                       # Program entry point
+├── backend/
+│   ├── api/                       # X API client
+│   ├── models/                    # Tweet data models
+│   ├── media/                     # Media downloading and processing
+│   ├── storage/                   # Cache and persistence
+│   ├── server/                    # HTTP and WebSocket handlers
+│   ├── download_tweets.py         # Tweet orchestration
+│   ├── gallery_server.py          # Server orchestration
+│   └── paths.py                   # Path utilities
+├── frontend/
+│   ├── components/                # UI components (card, media, avatar)
+│   ├── layout/                    # Layout (masonry, responsive)
+│   ├── data/                      # State and data loading
+│   ├── ui/                        # UI handlers (events, lazy-load)
+│   ├── ws/                        # WebSocket client
+│   ├── index.html                 # Main page
+│   ├── index.js                   # App orchestration
+│   ├── style.css                  # Styling
+│   └── components.css             # Component styles
+├── output/                        # Generated data (gitignored)
+└── assets/
+    └── heart_icon.svg             # Desktop icon
 ```
 
 ## Important Notes
 - Never share your credentials. They are only used to authenticate to Twitter / X.
-- Leaving `DOWNLOAD_IMAGES` set to `true` reduces repeated remote fetches and lowers rate‑limit risk.
 - Images are converted to WebP to save space.
-- Data (tweets + media) updates only when you click the Refresh button. It is recommended to use this feature sparingly to avoid Twitter/X rate limitations
+- Data (tweets + media) updates only when you click the Refresh button. It is recommended to use this feature sparingly to avoid Twitter/X rate limitations.
 
 ## Setup
 
-### 1. Install Requirements
-Python 3.9+ is recommended.
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure Credentials
+### 1. Configure Credentials
 Create a `.env` file in the project root with your Twitter/X credentials:
 
 ```env
@@ -74,7 +76,7 @@ HEADER_CSRF=your_csrf_token
 
 **Important:** Never share or commit `.env`.
 
-### 3. Configure Application Settings
+### 2. Configure Application Settings
 Edit `config.json`:
 
 ```json
@@ -85,16 +87,12 @@ Edit `config.json`:
 
 - `DOWNLOAD_IMAGES` (boolean): Whether to download and cache images locally. Set to `true` to reduce repeated remote fetches and rate-limit risk.
 
-### 4. Run
-Launch the server:
-```bash
-python run_server.py
-```
-A browser tab will open at:
-```
-http://localhost:8000/index.html
-```
-Click Refresh to fetch new likes and (optionally) download new media.
+### 3. Run
 
-## Disclaimer
-Use responsibly and only for personal archival / viewing of your own liked content.
+```bash
+./start.sh
+```
+
+`start.sh` creates a virtual environment, installs dependencies, and starts the server. The app will be available at `http://localhost:8000`.
+
+Click Refresh to fetch new likes and (optionally) download new media.

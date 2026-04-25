@@ -1,48 +1,28 @@
-import asyncio
+"""HTTP server for serving gallery and handling refresh requests."""
+
 import hashlib
 import json
 import logging
-import os
 import shutil
 import socketserver
-import threading
-import time
 import webbrowser
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
 from urllib.parse import unquote, urlparse
 
-import websockets
+import backend.download_tweets as download_tweets
+import backend.media.processor as media_processor
+from backend.paths import FRONTEND_DIR, OUTPUT_DIR
+from backend.server.config import DATA_ENDPOINT, OPEN_BROWSER, PORT, REFRESH_PATH
 
-import app.download_tweets as download_tweets
-import app.parse_media as parse_media
-from app.paths import OUTPUT_DIR, SRC_DIR
+LOG = logging.getLogger("http_server")
 
-# ==== Logging ====
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-LOG = logging.getLogger("gallery_server")
-
-# ==== Constants ====
-PORT = 8000
-WS_PORT = 8765
-CLIENT_TIMEOUT = 10  # seconds since last ping before a client is stale
-SHUTDOWN_WAIT = 1  # grace period before shutdown when no clients
-REFRESH_PATH = "/refresh"
-DATA_ENDPOINT = "data.json"
-OPEN_BROWSER = True
-
-STATIC_DIR = SRC_DIR
+STATIC_DIR = FRONTEND_DIR
 LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
 DATA_FILE = OUTPUT_DIR / "data.json"
 
-clients: Dict[Any, float] = {}
 
-
-# ==== File Change Detection ====
 def file_fingerprint(path: Path) -> Optional[Tuple[int, int, str]]:
     try:
         with open(path, "rb") as f:
@@ -56,7 +36,6 @@ def file_fingerprint(path: Path) -> Optional[Tuple[int, int, str]]:
         return None
 
 
-# ==== Helper ====
 def safe_path(root: Path, rel: str) -> Optional[Path]:
     try:
         candidate = (root / rel).resolve()
@@ -92,7 +71,6 @@ def write_json_response(
         handler.close_connection = True
 
 
-# ==== HTTP Handler ====
 class GalleryRequestHandler(SimpleHTTPRequestHandler):
     def translate_path(self, path: str) -> str:  # type: ignore[override]
         try:
@@ -136,7 +114,6 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
         else:
             write_json_response(self, {"error": "not_found"}, 404)
 
-    # --- Refresh Logic ---
     def handle_refresh(self) -> None:
         try:
             before_ids = self.get_tweet_ids()
@@ -177,9 +154,9 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
         else:
             LOG.info("Found %d new tweet(s); processing media...", len(new_ids))
         try:
-            parse_media.main()
+            media_processor.main()
         except Exception as e:
-            LOG.error("Media parsing failed: %s", e)
+            LOG.error("Media processing failed: %s", e)
 
     def get_tweet_ids(self) -> Set[str]:
         data = read_json(LIKED_TWEETS_FILE, [])
@@ -233,7 +210,6 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
             self.close_connection = True
 
 
-# ==== Threaded HTTP Server ====
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     allow_reuse_address = True
 
@@ -247,59 +223,3 @@ def start_http_server():
             except Exception as e:
                 LOG.debug("Browser open failed: %s", e)
         httpd.serve_forever()
-
-
-# ==== WebSocket Client Monitoring ====
-async def check_clients() -> None:
-    now = time.time()
-    stale = [ws for ws, last in clients.items() if now - last > CLIENT_TIMEOUT]
-    for ws in stale:
-        clients.pop(ws, None)
-        LOG.info("Removed inactive client")
-    if not clients:
-        LOG.info("No active clients. Waiting %ss before shutdown...", SHUTDOWN_WAIT)
-        await asyncio.sleep(SHUTDOWN_WAIT)
-        if not clients:
-            LOG.info("Shutting down (no clients).")
-            os._exit(0)
-
-
-async def monitor_clients() -> None:
-    while True:
-        await asyncio.sleep(CLIENT_TIMEOUT)
-        await check_clients()
-
-
-async def ws_handler(websocket):
-    LOG.info("[WebSocket] Client connected")
-    clients[websocket] = time.time()
-    try:
-        async for msg in websocket:
-            if msg == "ping":
-                clients[websocket] = time.time()
-            elif msg == "close":
-                LOG.info("[WebSocket] Client requested close")
-                break
-    except websockets.ConnectionClosed:
-        LOG.info("[WebSocket] Client disconnected")
-    except Exception as e:
-        LOG.error("WebSocket error: %s", e)
-    finally:
-        clients.pop(websocket, None)
-        await check_clients()
-
-
-async def start_ws() -> None:
-    LOG.info("[WebSocket] ws://localhost:%d", WS_PORT)
-    async with websockets.serve(ws_handler, "0.0.0.0", WS_PORT):
-        await monitor_clients()
-
-
-def main() -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    http_thread = threading.Thread(target=start_http_server, daemon=True)
-    http_thread.start()
-    try:
-        asyncio.run(start_ws())
-    except KeyboardInterrupt:
-        LOG.info("Interrupted. Exiting.")
