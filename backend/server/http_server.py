@@ -14,9 +14,8 @@ from urllib.parse import unquote, urlparse
 
 import backend.download_tweets as download_tweets
 import backend.media.processor as media_processor
-from backend.settings import LIKED_TWEETS_FILE, PROCESSED_JSON
-from backend.settings import FRONTEND_DIR, OUTPUT_DIR
 from backend.server.config import DATA_ENDPOINT, OPEN_BROWSER, PORT, REFRESH_PATH
+from backend.settings import FRONTEND_DIR, LIKED_TWEETS_FILE, OUTPUT_DIR, PROCESSED_JSON
 
 LOG = logging.getLogger("http_server")
 

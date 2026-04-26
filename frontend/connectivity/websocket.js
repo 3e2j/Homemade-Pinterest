@@ -28,7 +28,9 @@ export function setupWebSocketPing() {
 
   socket.onmessage = (event) => {
     if (event.data === MESSAGE_TYPES.UPDATE) {
-      window.dispatchEvent(new CustomEvent("data-updated", { detail: { source: "broadcast" } }));
+      window.dispatchEvent(
+        new CustomEvent("data-updated", { detail: { source: "broadcast" } }),
+      );
     } else {
       console.log("[WebSocket] Message received:", event.data);
     }

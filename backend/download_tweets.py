@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Set
 
-from backend.settings import JSON_INDENT, LIKED_TWEETS_FILE
+from backend.settings import LIKED_TWEETS_FILE
 from backend.tweets.cache import TweetCache
 from backend.tweets.downloader import XAPIClient
 from backend.tweets.parser import TweetParser

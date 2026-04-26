@@ -10,7 +10,10 @@ import {
   prependNewTweets,
 } from "./store/store.js";
 import { createCard, waitForMediaLoad } from "./components/tweet-card/card.js";
-import { setupResizeListener, layoutMasonry } from "./components/gallery/layout.js";
+import {
+  setupResizeListener,
+  layoutMasonry,
+} from "./components/gallery/layout.js";
 import { setupLazyLoad } from "./interactions/scroll.js";
 import { setupRefreshButton } from "./interactions/refresh.js";
 import { setupWebSocketPing } from "./connectivity/websocket.js";

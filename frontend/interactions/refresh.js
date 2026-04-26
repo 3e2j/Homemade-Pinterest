@@ -1,4 +1,11 @@
-import { getTweets, setTweets, getLoadedCount, setLoadedCount, fetchTweetsData, prependNewTweets } from "../store/store.js";
+import {
+  getTweets,
+  setTweets,
+  getLoadedCount,
+  setLoadedCount,
+  fetchTweetsData,
+  prependNewTweets,
+} from "../store/store.js";
 import { layoutMasonry } from "../components/gallery/layout.js";
 
 async function performRefresh(insertTweetsFunc, isBroadcast = false) {
@@ -7,9 +14,7 @@ async function performRefresh(insertTweetsFunc, isBroadcast = false) {
     const tweets = getTweets();
     const existingIds = new Set(tweets.map((t) => t.id || t.tweet_id));
     const freshIds = new Set(fresh.map((t) => t.id || t.tweet_id));
-    const newOnes = fresh.filter(
-      (t) => !existingIds.has(t.id || t.tweet_id),
-    );
+    const newOnes = fresh.filter((t) => !existingIds.has(t.id || t.tweet_id));
     const removedIds = [...existingIds].filter((id) => !freshIds.has(id));
 
     if (removedIds.length) {
@@ -57,7 +62,7 @@ async function performRefresh(insertTweetsFunc, isBroadcast = false) {
 
 export function setupRefreshButton(insertTweetsFunc) {
   const btn = document.getElementById("refresh-btn");
-  
+
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     btn.textContent = "Refreshing...";

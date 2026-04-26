@@ -1,4 +1,8 @@
-import { SCROLL_ROOT_MARGIN, getTweets, getLoadedCount } from "../store/store.js";
+import {
+  SCROLL_ROOT_MARGIN,
+  getTweets,
+  getLoadedCount,
+} from "../store/store.js";
 
 export function setupLazyLoad(loadMoreCallback) {
   const sentinel = document.createElement("div");
@@ -9,7 +13,10 @@ export function setupLazyLoad(loadMoreCallback) {
     (entries) => {
       const tweets = getTweets();
       const loadedCount = getLoadedCount();
-      if (entries.some((e) => e.isIntersecting) && loadedCount < tweets.length) {
+      if (
+        entries.some((e) => e.isIntersecting) &&
+        loadedCount < tweets.length
+      ) {
         loadMoreCallback();
       }
     },

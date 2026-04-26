@@ -9,7 +9,7 @@ from typing import Any, Dict
 
 import websockets
 
-from backend.server.config import WS_PORT, CLIENT_TIMEOUT, SHUTDOWN_WAIT
+from backend.server.config import CLIENT_TIMEOUT, SHUTDOWN_WAIT, WS_PORT
 
 LOG = logging.getLogger("ws_handler")
 
@@ -18,21 +18,21 @@ _clients_lock = threading.Lock()
 
 
 async def broadcast_update() -> None:
-  """Notify all connected clients that data has been updated."""
-  if not clients:
-    return
-  
-  with _clients_lock:
-    # Create a copy to iterate over (dict may change during iteration)
-    client_list = list(clients.keys())
-  
-  for websocket in client_list:
-    try:
-      await websocket.send("update")
-      LOG.debug("[WebSocket] Sent update notification to client")
-    except Exception as e:
-      LOG.debug("[WebSocket] Failed to send update: %s", e)
-      # Client likely disconnected, will be cleaned up by monitor_clients
+    """Notify all connected clients that data has been updated."""
+    if not clients:
+        return
+
+    with _clients_lock:
+        # Create a copy to iterate over (dict may change during iteration)
+        client_list = list(clients.keys())
+
+    for websocket in client_list:
+        try:
+            await websocket.send("update")
+            LOG.debug("[WebSocket] Sent update notification to client")
+        except Exception as e:
+            LOG.debug("[WebSocket] Failed to send update: %s", e)
+            # Client likely disconnected, will be cleaned up by monitor_clients
 
 
 async def check_clients() -> None:
@@ -42,12 +42,12 @@ async def check_clients() -> None:
         for ws in stale:
             clients.pop(ws, None)
             LOG.info("Removed inactive client")
-        
+
         if not clients:
             LOG.info("No active clients. Waiting %ss before shutdown...", SHUTDOWN_WAIT)
-    
+
     await asyncio.sleep(SHUTDOWN_WAIT)
-    
+
     with _clients_lock:
         if not clients:
             LOG.info("Shutting down (no clients).")

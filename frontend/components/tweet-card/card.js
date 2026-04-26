@@ -1,4 +1,7 @@
-import { SAME_ASPECT_TOLERANCE, WIDE_IMAGE_THRESHOLD } from "../../store/store.js";
+import {
+  SAME_ASPECT_TOLERANCE,
+  WIDE_IMAGE_THRESHOLD,
+} from "../../store/store.js";
 import { createAvatarElement } from "./avatar.js";
 import { getMediaSrc, isVideoMedia, createMediaElement } from "./media.js";
 
@@ -16,7 +19,7 @@ function createSensitiveMediaWrap(src, card, hideBtn) {
   wrap.href = getMediaSrc(src);
   wrap.className = "media-wrap crop-to-ratio";
   wrap.target = "_blank";
-  
+
   const mediaEl = createMediaElement(src);
   mediaEl.classList.add("blurred");
   wrap.appendChild(mediaEl);
@@ -67,8 +70,7 @@ function buildMediaGrid(tweet, imageRatios, allSameAspectRatio, addMediaWrap) {
   grid.className = "media-grid";
 
   if (tweet.media.length === 3) {
-    const firstIsWide =
-      imageRatios[0] && imageRatios[0] > WIDE_IMAGE_THRESHOLD;
+    const firstIsWide = imageRatios[0] && imageRatios[0] > WIDE_IMAGE_THRESHOLD;
 
     if (firstIsWide) {
       grid.classList.add("three-wide-top");
