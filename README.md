@@ -3,7 +3,7 @@
 A self-hosted, Pinterest-like web app for viewing Twitter/X media locally.
 The app obtains your liked tweets, and allows you to browse them in a grid-view.
 
-You can choose to download all images, caching them locally - or receive them directly from Twitter/X's API.
+Media files are automatically downloaded and cached locally, with optional WebP conversion to save space.
 
 ![Homemade Pinterest example](https://imgur.com/1VrhPjn.png)
 
@@ -11,11 +11,11 @@ You can choose to download all images, caching them locally - or receive them di
 
 - **Pinterest-style grid layout** for much easier browsing of your Twitter/X Likes.
 - **Automatic media download:** Saves tweet images and user avatars for offline access.
+- **WebP conversion:** Optionally convert images to WebP format to reduce storage usage.
 - **Privacy blur:** For detected sensitive media.
 
 ## Important Notes
 - Never share your credentials. They are only used to authenticate to Twitter / X.
-- Images are converted to WebP to save space.
 - Data (tweets + media) updates only when you click the Refresh button. It is recommended to use this feature sparingly to avoid Twitter/X rate limitations.
 
 ## Setup
@@ -49,11 +49,17 @@ Edit `config.json`:
 
 ```json
 {
-    "DOWNLOAD_IMAGES": true
+  "webp_conversion": {
+    "enabled": true,
+    "quality": 80,
+    "method": 6
+  }
 }
 ```
 
-- `DOWNLOAD_IMAGES` (boolean): Whether to download and cache images locally. Set to `true` to reduce repeated remote fetches and rate-limit risk.
+- `webp_conversion.enabled` (boolean): Whether to convert images to WebP format. Default: `true`
+- `webp_conversion.quality` (0-100): WebP quality level. Default: `80` (recommended: 75-85)
+- `webp_conversion.method` (0-6): WebP compression method. Default: `6` (slower but better compression; use lower values for faster processing)
 
 ### 3. Run
 
@@ -63,4 +69,4 @@ Edit `config.json`:
 
 `start.sh` creates a virtual environment, installs dependencies, and starts the server. The app will be available at `http://localhost:8000`.
 
-Click Refresh to fetch new likes and (optionally) download new media.
+Click Refresh to fetch new likes and download/process new media.

@@ -3,14 +3,6 @@
 import json
 from typing import Any, Dict, List
 
-# from backend.media.cleaner import cleanup
-from backend.settings import (
-    AVATAR_DIR,
-    DOWNLOAD_IMAGES,
-    LIKED_TWEETS_FILE,
-    MAX_MEDIA_PER_TWEET,
-    PROCESSED_JSON,
-)
 from backend.media.downloader import download_bulk_media, get_media_folder_dir
 from backend.media.transformer import (
     convert_media_files,
@@ -18,6 +10,15 @@ from backend.media.transformer import (
 )
 from backend.media.utils import (
     load_json_file,
+)
+
+# from backend.media.cleaner import cleanup
+from backend.settings import (
+    AVATAR_DIR,
+    LIKED_TWEETS_FILE,
+    MAX_MEDIA_PER_TWEET,
+    PROCESSED_JSON,
+    WEBP_ENABLED,
 )
 
 
@@ -96,30 +97,30 @@ def main() -> None:
         f"[Processor] Kept {len(filtered_tweets)} tweets (out of {len(raw_tweets)} total"
     )
 
-    if DOWNLOAD_IMAGES:
-        print("[Processor] Collecting media URLs...")
-        url_folder_pairs = _get_url_folder_pairs(filtered_tweets)
-        if not url_folder_pairs:
-            print("[Processor] No URLs to download. Exiting.")
-            return
+    print("[Processor] Collecting media URLs...")
+    url_folder_pairs = _get_url_folder_pairs(filtered_tweets)
+    if not url_folder_pairs:
+        print("[Processor] No URLs to download. Exiting.")
+        return
 
-        print(
-            f"[Processor] Downloading media files ({len(url_folder_pairs)} to download)..."
-        )
-        url_file_pairs = download_bulk_media(url_folder_pairs)
-        if not url_file_pairs:
-            print("[Processor] Failed to download media files. Exiting.")
-            return
+    print(
+        f"[Processor] Downloading media files ({len(url_folder_pairs)} to download)..."
+    )
+    url_file_pairs = download_bulk_media(url_folder_pairs)
+    if not url_file_pairs:
+        print("[Processor] Failed to download media files. Exiting.")
+        return
 
+    if WEBP_ENABLED:
         print("[Processor] Converting images to WebP format...")
-        url_to_hashed = convert_media_files(url_file_pairs)
-        if not url_to_hashed:
-            print("[Processor] Failed to convert media files. Exiting.")
-            return
-        print("[Processor] Successfully converted images")
     else:
-        print("[Processor] Using remote URLs (DOWNLOAD_IMAGES=false)")
-        url_to_hashed = {url: url for tweet in filtered_tweets for url in [tweet.get("user_avatar_url", "")] + tweet.get("tweet_media_urls", []) if url}
+        print("[Processor] Hashing image names...")
+
+    url_to_hashed = convert_media_files(url_file_pairs)
+    if not url_to_hashed:
+        print("[Processor] Failed to convert media files. Exiting.")
+        return
+    print("[Processor] Successfully converted images")
 
     print("[Processor] Preparing tweet data for export...")
     processed_tweets = prepare_tweets_data(filtered_tweets, url_to_hashed)

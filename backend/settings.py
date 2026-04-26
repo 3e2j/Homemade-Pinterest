@@ -27,8 +27,6 @@ for folder in MEDIA_DIRS:
 MAX_MEDIA_PER_TWEET = 4
 COMPATIBLE_WEBP_EXTS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTS = {".mp4", ".webm", ".mov"}
-WEBP_QUALITY = 60
-WEBP_METHOD = 6
 HASH_CHUNK_SIZE = 65536
 
 JSON_INDENT = 2
@@ -42,4 +40,8 @@ except Exception as e:
     print(f"Failed to load {CONFIG_FILE}: {e}")
     sys.exit(1)
 
-DOWNLOAD_IMAGES = _config.get("DOWNLOAD_IMAGES", True)
+# WebP conversion settings
+_webp_config = _config.get("webp_conversion", {})
+WEBP_ENABLED = _webp_config.get("enabled", True)
+WEBP_QUALITY = _webp_config.get("quality", 80)
+WEBP_METHOD = _webp_config.get("method", 6)

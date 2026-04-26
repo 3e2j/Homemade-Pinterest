@@ -1,7 +1,7 @@
 {
-    "USER_ID": "UserID",
-    "HEADER_AUTHORIZATION": "Bearer AAA",
-    "HEADER_COOKIES": "Cookies",
-    "HEADER_CSRF": "Csrf",
-    "DOWNLOAD_IMAGES": true
+  "webp_conversion": {
+    "enabled": true,
+    "quality": 80,
+    "method": 6
+  }
 }

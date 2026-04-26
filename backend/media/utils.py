@@ -11,9 +11,9 @@ from backend.settings import (
     HASH_CHUNK_SIZE,
     MEDIA_DIRS,
     MEDIA_ROOT_DIR,
+    OUTPUT_DIR,
     VIDEO_EXTS,
 )
-from backend.settings import OUTPUT_DIR
 
 
 def load_json_file(path: Path, default: Any):

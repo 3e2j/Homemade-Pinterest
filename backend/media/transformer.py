@@ -5,17 +5,18 @@ from typing import Any, Dict, List, Optional
 
 from PIL import Image
 
-from backend.settings import (
-    COMPATIBLE_WEBP_EXTS,
-    MAX_MEDIA_PER_TWEET,
-    VIDEO_EXTS,
-    WEBP_METHOD,
-    WEBP_QUALITY,
-)
 from backend.media.utils import (
     compute_file_hash,
     path_to_output_rel,
     resolve_mapped_path,
+)
+from backend.settings import (
+    COMPATIBLE_WEBP_EXTS,
+    MAX_MEDIA_PER_TWEET,
+    VIDEO_EXTS,
+    WEBP_ENABLED,
+    WEBP_METHOD,
+    WEBP_QUALITY,
 )
 
 
@@ -80,16 +81,18 @@ def convert_media_files(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, s
             continue
 
         # Check if file can be converted to WebP
-        if filepath.suffix.lower() in COMPATIBLE_WEBP_EXTS:
+        if WEBP_ENABLED and filepath.suffix.lower() in COMPATIBLE_WEBP_EXTS:
             converted_path = convert_to_webp(filepath)
             hashed_filename = path_to_output_rel(converted_path)
         else:
-            # For non-convertible files (videos, etc), rename to hash naming
+            # For non-convertible files or when WebP disabled, rename to hash naming
             hash_filename = _get_hash_filename(filepath)
             if hash_filename:
                 hashed_path = filepath.parent / hash_filename
                 if not hashed_path.exists():
                     filepath.rename(hashed_path)
+                elif filepath != hashed_path:
+                    filepath.unlink()
                 hashed_filename = path_to_output_rel(hashed_path)
             else:
                 hashed_filename = rel_filename
