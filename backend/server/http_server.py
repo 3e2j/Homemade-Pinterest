@@ -5,6 +5,7 @@ import json
 import logging
 import shutil
 import socketserver
+import threading
 import webbrowser
 from http.server import SimpleHTTPRequestHandler
 from pathlib import Path
@@ -13,14 +14,25 @@ from urllib.parse import unquote, urlparse
 
 import backend.download_tweets as download_tweets
 import backend.media.processor as media_processor
-from backend.paths import FRONTEND_DIR, OUTPUT_DIR
+from backend.settings import LIKED_TWEETS_FILE, PROCESSED_JSON
+from backend.settings import FRONTEND_DIR, OUTPUT_DIR
 from backend.server.config import DATA_ENDPOINT, OPEN_BROWSER, PORT, REFRESH_PATH
 
 LOG = logging.getLogger("http_server")
 
 STATIC_DIR = FRONTEND_DIR
-LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
-DATA_FILE = OUTPUT_DIR / "data.json"
+DATA_FILE = PROCESSED_JSON
+
+# Lock to serialize refresh operations across clients
+_refresh_lock = threading.Lock()
+# Broadcast function will be set by ws_handler
+_broadcast_update = None
+
+
+def set_broadcast_function(func):
+    """Register the broadcast function from ws_handler."""
+    global _broadcast_update
+    _broadcast_update = func
 
 
 def file_fingerprint(path: Path) -> Optional[Tuple[int, int, str]]:
@@ -118,41 +130,49 @@ class GalleryRequestHandler(SimpleHTTPRequestHandler):
         """Extract new tweets from the cache that match new_ids."""
         if not new_ids:
             return []
-        
+
         all_tweets = read_json(LIKED_TWEETS_FILE, [])
         if not isinstance(all_tweets, list):
             return []
-        
+
         return [t for t in all_tweets if t.get("tweet_id") in new_ids]
 
     def handle_refresh(self) -> None:
-        try:
-            before_ids = self.get_tweet_ids()
-            before_fp = file_fingerprint(LIKED_TWEETS_FILE)
-            download_tweets.main()
-            after_fp = file_fingerprint(LIKED_TWEETS_FILE)
-            file_updated = before_fp != after_fp
-            new_ids: Set[str] = set()
-            
-            if file_updated:
-                after_ids = self.get_tweet_ids()
-                new_ids = after_ids - before_ids
-                self.process_media(new_ids)
-            
-            new_tweets_list = self._get_new_tweet_list(new_ids)
-            
-            write_json_response(
-                self,
-                {
-                    "new_found": bool(new_ids),
-                    "new_tweets": new_tweets_list,
-                    "updated": bool(file_updated),
-                    "new_count": len(new_tweets_list),
-                },
-            )
-        except Exception as e:
-            LOG.exception("Refresh failed")
-            write_json_response(self, {"error": "internal", "detail": str(e)}, 500)
+        global _refresh_lock, _broadcast_update
+
+        # Acquire lock to prevent concurrent refreshes from multiple clients
+        with _refresh_lock:
+            try:
+                before_ids = self.get_tweet_ids()
+                before_fp = file_fingerprint(LIKED_TWEETS_FILE)
+                download_tweets.main()
+                after_fp = file_fingerprint(LIKED_TWEETS_FILE)
+                file_updated = before_fp != after_fp
+                new_ids: Set[str] = set()
+
+                if file_updated:
+                    after_ids = self.get_tweet_ids()
+                    new_ids = after_ids - before_ids
+                    self.process_media(new_ids)
+
+                new_tweets_list = self._get_new_tweet_list(new_ids)
+
+                # Broadcast update to all other connected clients
+                if _broadcast_update and file_updated:
+                    _broadcast_update()
+
+                write_json_response(
+                    self,
+                    {
+                        "new_found": bool(new_ids),
+                        "new_tweets": new_tweets_list,
+                        "updated": bool(file_updated),
+                        "new_count": len(new_tweets_list),
+                    },
+                )
+            except Exception as e:
+                LOG.exception("Refresh failed")
+                write_json_response(self, {"error": "internal", "detail": str(e)}, 500)
 
     def process_media(self, new_ids: Set[str]) -> None:
         if not new_ids:

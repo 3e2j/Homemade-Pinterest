@@ -1,18 +1,20 @@
 import { MEDIA_IMAGES_DIR, VIDEO_EXTENSIONS } from "../../store/store.js";
 
 export function getMediaSrc(media) {
-  if (typeof media === "string" && media.includes("://")) {
-    return media;
+  const path = typeof media === "object" ? media.path : media;
+  if (typeof path === "string" && path.includes("://")) {
+    return path;
   }
-  if (typeof media === "string" && media.includes("/")) {
-    return media;
+  if (typeof path === "string" && path.includes("/")) {
+    return path;
   }
-  return `${MEDIA_IMAGES_DIR}/${media}`;
+  return `${MEDIA_IMAGES_DIR}/${path}`;
 }
 
 export function isVideoMedia(media) {
-  if (typeof media !== "string") return false;
-  const lower = media.toLowerCase();
+  const path = typeof media === "object" ? media.path : media;
+  if (typeof path !== "string") return false;
+  const lower = path.toLowerCase();
   return VIDEO_EXTENSIONS.some((ext) => lower.includes(ext));
 }
 

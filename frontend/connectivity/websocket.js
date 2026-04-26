@@ -4,6 +4,7 @@ const MESSAGE_TYPES = {
   PING: "ping",
   PONG: "pong",
   CLOSE: "close",
+  UPDATE: "update",
 };
 
 function createPingMessage() {
@@ -26,7 +27,11 @@ export function setupWebSocketPing() {
   };
 
   socket.onmessage = (event) => {
-    console.log("[WebSocket] Message received:", event.data);
+    if (event.data === MESSAGE_TYPES.UPDATE) {
+      window.dispatchEvent(new CustomEvent("data-updated", { detail: { source: "broadcast" } }));
+    } else {
+      console.log("[WebSocket] Message received:", event.data);
+    }
   };
 
   socket.onerror = (error) => {

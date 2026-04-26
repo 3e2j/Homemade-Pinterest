@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from backend.settings import JSON_INDENT
+
 UTF8 = "utf8"
-JSON_INDENT = 2
 TWEET_ID_KEY = "tweet_id"
 
 

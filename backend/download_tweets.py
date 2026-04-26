@@ -2,15 +2,13 @@
 
 from typing import Any, Dict, List, Set
 
+from backend.settings import JSON_INDENT, LIKED_TWEETS_FILE
+from backend.tweets.cache import TweetCache
 from backend.tweets.downloader import XAPIClient
 from backend.tweets.parser import TweetParser
-from backend.paths import OUTPUT_DIR
-from backend.tweets.cache import TweetCache
 
-LIKED_TWEETS_FILE = OUTPUT_DIR / "liked_tweets.json"
-JSON_INDENT = 2
 TWEET_ID_KEY = "tweet_id"
-DEFAULT_CONSECUTIVE_SEEN_LIMIT = 80
+DEFAULT_CONSECUTIVE_SEEN_LIMIT = 0  # 80
 
 
 class TweetDownloader:

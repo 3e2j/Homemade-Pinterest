@@ -4,8 +4,16 @@ import json
 from hashlib import md5
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
-HASH_CHUNK_SIZE = 65536
+from backend.settings import (
+    COMPATIBLE_WEBP_EXTS,
+    HASH_CHUNK_SIZE,
+    MEDIA_DIRS,
+    MEDIA_ROOT_DIR,
+    VIDEO_EXTS,
+)
+from backend.settings import OUTPUT_DIR
 
 
 def load_json_file(path: Path, default: Any):
@@ -44,14 +52,12 @@ def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
 
 def path_to_output_rel(filepath: Path) -> str:
     """Convert filepath to output-relative path string."""
-    from backend.paths import OUTPUT_DIR
 
     return filepath.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
 
 
 def resolve_mapped_path(mapped: str) -> Optional[Path]:
     """Resolve cached path string to actual filesystem path."""
-    from backend.paths import OUTPUT_DIR
 
     if not mapped:
         return None
@@ -64,14 +70,33 @@ def resolve_mapped_path(mapped: str) -> Optional[Path]:
     if direct.exists():
         return direct
 
-    media_dirs = [
-        OUTPUT_DIR / "media" / "images",
-        OUTPUT_DIR / "media" / "videos",
-        OUTPUT_DIR / "media" / "avatars",
-    ]
-    for folder in media_dirs:
+    media_rel = (MEDIA_ROOT_DIR / mapped_path).resolve()
+    if media_rel.exists():
+        return media_rel
+
+    for folder in MEDIA_DIRS:
         candidate = folder / mapped
         if candidate.exists():
             return candidate
 
     return None
+
+
+def get_media_type(url: str) -> str:
+    """Determine media type (images/videos/avatars) from URL."""
+
+    ext = Path(urlparse(url).path).suffix.lower()
+    if ext in VIDEO_EXTS:
+        return "videos"
+    elif ext in COMPATIBLE_WEBP_EXTS:
+        return "images"
+    return "images"
+
+
+def url_to_filename(url: str) -> str:
+    """Extract original filename from URL (last part of path)."""
+
+    if not url:
+        return ""
+    path = urlparse(url).path
+    return Path(path).name or "unknown"
