@@ -10,6 +10,7 @@ from backend.media.transformer import (
 )
 from backend.media.utils import (
     load_json_file,
+    resolve_mapped_path,
 )
 
 # from backend.media.cleaner import cleanup
@@ -58,22 +59,70 @@ def _get_url_folder_pairs(
     return url_folder_pairs
 
 
-def _filter_existing_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _filter_existing_tweets(
+    tweets: List[Dict[str, Any]], existing_tweets: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
     """Filter out tweets whose IDs already exist in data.json."""
-    existing_ids = set()
-    if PROCESSED_JSON.exists():
-        try:
-            existing_data = load_json_file(PROCESSED_JSON, [])
-            existing_ids = {
-                str(tweet.get("id")) for tweet in existing_data if tweet.get("id")
-            }
-        except Exception as e:
-            print(f"[Processor] Failed to load existing IDs from data.json: {e}")
+    existing_ids = {
+        str(tweet.get("id")) for tweet in existing_tweets if tweet.get("id")
+    }
+    return [tweet for tweet in tweets if str(tweet.get("tweet_id")) not in existing_ids]
 
-    new_tweets = [
-        tweet for tweet in tweets if str(tweet.get("tweet_id")) not in existing_ids
-    ]
-    return new_tweets
+
+def _get_referenced_paths(tweets: List[Dict[str, Any]]) -> set:
+    """Return all local media paths referenced by a list of processed tweets."""
+    paths = set()
+    for tweet in tweets:
+        if tweet.get("avatar"):
+            paths.add(tweet["avatar"])
+        for media in tweet.get("media", []):
+            if media.get("path"):
+                paths.add(media["path"])
+    return paths
+
+
+def _remove_tweets_and_orphaned_media(
+    existing_tweets: List[Dict[str, Any]],
+    raw_tweets: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], int]:
+    """Remove processed tweets whose IDs are no longer in raw_tweets, and
+    delete any media files they referenced that are not used by any remaining tweet.
+
+    Returns (surviving_tweets, removal_count).
+    """
+    current_ids = {str(t.get("tweet_id")) for t in raw_tweets if t.get("tweet_id")}
+    surviving_tweets = [t for t in existing_tweets if str(t.get("id")) in current_ids]
+    removed_tweets = [t for t in existing_tweets if str(t.get("id")) not in current_ids]
+
+    if not removed_tweets:
+        return existing_tweets, 0
+
+    surviving_paths = _get_referenced_paths(surviving_tweets)
+    removed_paths = _get_referenced_paths(removed_tweets)
+    orphaned_paths = removed_paths - surviving_paths
+
+    deleted, failed = 0, 0
+    for rel_path in orphaned_paths:
+        resolved = resolve_mapped_path(rel_path)
+        if not resolved:
+            continue
+        try:
+            if resolved.exists():
+                resolved.unlink()
+                deleted += 1
+        except Exception as e:
+            print(f"[Processor] Failed to delete orphaned file {resolved}: {e}")
+            failed += 1
+
+    shared = len(removed_paths) - len(orphaned_paths)
+    print(
+        f"[Processor] Removed {len(removed_tweets)} stale tweets, "
+        f"deleted {deleted} orphaned media files"
+        + (f", {shared} shared files kept" if shared else "")
+        + (f", {failed} deletions failed" if failed else "")
+    )
+
+    return surviving_tweets, len(removed_tweets)
 
 
 def main() -> None:
@@ -83,19 +132,35 @@ def main() -> None:
         raise ValueError("liked_tweets.json must contain a JSON array")
 
     print("[Processor] Filtering tweets...")
-    filtered_tweets = _filter_tweets_with_media(raw_tweets)
-    if not filtered_tweets:
+    tweets_with_media = _filter_tweets_with_media(raw_tweets)
+    if not tweets_with_media:
         print("[Processor] No tweets with media found. Exiting.")
         return
 
-    filtered_tweets = _filter_existing_tweets(filtered_tweets)
-    if not filtered_tweets:
-        print("[Processor] All tweets already exist in data.json. Exiting.")
-        return
+    # Load existing processed data once; reuse throughout
+    existing_tweets = []
+    if PROCESSED_JSON.exists():
+        with open(PROCESSED_JSON, "r", encoding="utf8") as f:
+            try:
+                existing_tweets = json.load(f)
+            except json.JSONDecodeError:
+                existing_tweets = []
 
-    print(
-        f"[Processor] Kept {len(filtered_tweets)} tweets (out of {len(raw_tweets)} total"
+    # Remove unliked tweets
+    existing_tweets, removal_count = _remove_tweets_and_orphaned_media(
+        existing_tweets, tweets_with_media
     )
+
+    filtered_tweets = _filter_existing_tweets(tweets_with_media, existing_tweets)
+
+    if not filtered_tweets:
+        if removal_count:
+            with open(PROCESSED_JSON, "w", encoding="utf8") as f:
+                json.dump(existing_tweets, f)
+            print("[Processor] No new tweets to add. Saved updated data.json.")
+        else:
+            print("[Processor] All tweets already exist in data.json. Exiting.")
+        return
 
     print("[Processor] Collecting media URLs...")
     url_folder_pairs = _get_url_folder_pairs(filtered_tweets)
@@ -120,18 +185,27 @@ def main() -> None:
     if not url_to_hashed:
         print("[Processor] Failed to convert media files. Exiting.")
         return
-    print("[Processor] Successfully converted images")
 
+    print("[Processor] Successfully converted images")
     print("[Processor] Preparing tweet data for export...")
     processed_tweets = prepare_tweets_data(filtered_tweets, url_to_hashed)
     if not processed_tweets:
         print("[Processor] No tweets prepared for export. Exiting.")
         return
 
-    with open(PROCESSED_JSON, "w", encoding="utf8") as f:
-        json.dump(processed_tweets, f)
+    # Merge new tweets with surviving existing tweets, deduplicating by id
+    existing_ids = {tweet["id"] for tweet in existing_tweets}
+    new_tweets = [t for t in processed_tweets if t["id"] not in existing_ids]
+    merged_tweets = new_tweets + existing_tweets
 
-    print(f"[Processor] Tweets processed and saved to {PROCESSED_JSON}")
+    with open(PROCESSED_JSON, "w", encoding="utf8") as f:
+        json.dump(merged_tweets, f)
+
+    print(
+        f"[Processor] Added {len(new_tweets)} new tweets, "
+        f"removed {removal_count} stale tweets "
+        f"({len(merged_tweets)} total)"
+    )
 
 
 if __name__ == "__main__":

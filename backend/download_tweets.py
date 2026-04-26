@@ -8,7 +8,7 @@ from backend.tweets.downloader import XAPIClient
 from backend.tweets.parser import TweetParser
 
 TWEET_ID_KEY = "tweet_id"
-DEFAULT_CONSECUTIVE_SEEN_LIMIT = 0  # 80
+DEFAULT_CONSECUTIVE_SEEN_LIMIT = 80  # 80
 
 
 class TweetDownloader:

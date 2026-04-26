@@ -20,33 +20,26 @@ from backend.settings import (
 )
 
 
-def _get_hash_filename(filepath: Path, new_ext: Optional[str] = None) -> str:
-    """Get hashed filename for a file.
+def _get_hashed_path(filepath: Path) -> Optional[Path]:
+    """Return a new Path in the same directory with a hashed filename.
 
-    Returns filename as {content_hash}.{ext}. If new_ext provided, uses that instead of original.
-    Returns empty string on hash failure.
+    Uses the content hash as the filename, keeping the original extension
     """
     content_hash = compute_file_hash(filepath)
     if not content_hash:
-        return ""
+        return None
+    ext = filepath.suffix.lower()
+    return filepath.parent / f"{content_hash}{ext}"
 
-    ext = new_ext if new_ext else filepath.suffix.lower()
-    return f"{content_hash}{ext}"
 
-
-def convert_to_webp(filepath: Path, quality: int = WEBP_QUALITY) -> Path:
+def convert_to_webp(
+    filepath: Path, webp_path: Path, quality: int = WEBP_QUALITY
+) -> Path:
     """Convert `filepath` to WebP with content hash naming.
 
     Saves the WebP file as {content_hash}.webp and removes the original.
     Returns the path to the WebP file, or the original path on failure.
     """
-    hash_filename = _get_hash_filename(filepath, ".webp")
-    if not hash_filename:
-        return filepath
-
-    webp_path = filepath.parent / hash_filename
-    if webp_path.exists():
-        return webp_path
 
     try:
         with Image.open(filepath) as img:
@@ -74,28 +67,31 @@ def convert_media_files(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, s
 
     for url, rel_filename in url_file_pairs.items():
         if not rel_filename:
+            print("WARNING, rel_filename is missing from pair")
             continue
 
         filepath = resolve_mapped_path(rel_filename)
         if not filepath or not filepath.exists():
+            print("WARNING, media filepath could not be found or does not exist")
+            continue
+
+        hashed_path = _get_hashed_path(filepath)
+        if hashed_path is None:
+            print("Could not get hashed path for media")
             continue
 
         # Check if file can be converted to WebP
         if WEBP_ENABLED and filepath.suffix.lower() in COMPATIBLE_WEBP_EXTS:
-            converted_path = convert_to_webp(filepath)
+            converted_path = convert_to_webp(filepath, hashed_path.with_suffix(".webp"))
             hashed_filename = path_to_output_rel(converted_path)
+
         else:
-            # For non-convertible files or when WebP disabled, rename to hash naming
-            hash_filename = _get_hash_filename(filepath)
-            if hash_filename:
-                hashed_path = filepath.parent / hash_filename
-                if not hashed_path.exists():
-                    filepath.rename(hashed_path)
-                elif filepath != hashed_path:
-                    filepath.unlink()
-                hashed_filename = path_to_output_rel(hashed_path)
+            # Duplicate hash, use the one thats already on disk
+            if hashed_path.exists():
+                filepath.unlink()
             else:
-                hashed_filename = rel_filename
+                filepath.rename(hashed_path)
+            hashed_filename = path_to_output_rel(hashed_path)
 
         url_to_hashed[url] = hashed_filename
 
