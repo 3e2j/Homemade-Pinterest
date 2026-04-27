@@ -3,5 +3,8 @@
     "enabled": true,
     "quality": 80,
     "method": 6
+  },
+  "server": {
+    "closeOnPageClose": true
   }
 }

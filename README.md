@@ -20,6 +20,10 @@ Media files are automatically downloaded and cached locally, with optional WebP 
 
 ## Setup
 
+### Requirements
+- **Python 3.8+** - for tweet downloading and media processing
+- **Node.js 18+** - for the web server (npm comes with Node.js)
+
 ### 1. Configure Credentials
 Create a `.env` file in the project root with your Twitter/X credentials:
 
@@ -44,29 +48,18 @@ HEADER_CSRF=your_csrf_token
 
 **Important:** Never share or commit `.env`.
 
-### 2. Configure Application Settings
-Edit `config.json`:
-
-```json
-{
-  "webp_conversion": {
-    "enabled": true,
-    "quality": 80,
-    "method": 6
-  }
-}
-```
-
-- `webp_conversion.enabled` (boolean): Whether to convert images to WebP format. Default: `true`
-- `webp_conversion.quality` (0-100): WebP quality level. Default: `80` (recommended: 75-85)
-- `webp_conversion.method` (0-6): WebP compression method. Default: `6` (slower but better compression; use lower values for faster processing)
-
-### 3. Run
+### 2. Run
 
 ```bash
 ./start.sh
 ```
 
-`start.sh` creates a virtual environment, installs dependencies, and starts the server. The app will be available at `http://localhost:8000`.
+`start.sh` will:
+1. Create a Python virtual environment (if needed)
+2. Install Python dependencies
+3. Install Node.js dependencies  
+4. Start the server at `http://localhost:8000`
 
-Click Refresh to fetch new likes and download/process new media.
+The server logs will appear in your terminal. Press `Ctrl+C` to stop the server.
+
+Click **Refresh** to fetch new likes and download/process new media.

@@ -1,3 +1,5 @@
+/** Media (image/video) rendering component. */
+
 import { MEDIA_IMAGES_DIR, VIDEO_EXTENSIONS } from "../../store/store.js";
 
 export function getMediaSrc(media) {

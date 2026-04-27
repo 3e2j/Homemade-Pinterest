@@ -10,18 +10,10 @@
         </script>
     </head>
     <body>
-        <button
-            id="refresh-btn"
-            style="
-                position: fixed;
-                top: 10px;
-                right: 10px;
-                z-index: 1000;
-                font-size: 16px;
-            "
-        >
-            🔄 Refresh
-        </button>
+        <div id="top-controls">
+            <button id="refresh-btn">Refresh</button>
+            <button id="settings-btn">Settings</button>
+        </div>
         <div id="grid"></div>
 
         <script type="module">

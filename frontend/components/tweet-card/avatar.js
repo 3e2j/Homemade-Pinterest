@@ -1,3 +1,5 @@
+/** User avatar image handler. */
+
 import { AVATAR_DIR } from "../../store/store.js";
 
 export function getAvatarSrc(avatar) {

@@ -1,3 +1,5 @@
+/** Main application orchestrator and entry point. */
+
 import {
   BATCH_SIZE,
   setTweets,
@@ -9,6 +11,7 @@ import {
   fetchTweetsData,
   prependNewTweets,
 } from "./store/store.js";
+import { STATUS, setStatus, onStatusChange } from "./store/status.js";
 import { createCard, waitForMediaLoad } from "./components/tweet-card/card.js";
 import {
   setupResizeListener,
@@ -16,7 +19,16 @@ import {
 } from "./components/gallery/layout.js";
 import { setupLazyLoad } from "./interactions/scroll.js";
 import { setupRefreshButton } from "./interactions/refresh.js";
-import { setupWebSocketPing } from "./connectivity/websocket.js";
+import { refreshAndFetchData } from "./connectivity/refresh-utils.js";
+import {
+  initSettings,
+  setupSettingsButton,
+} from "./components/settings/modal.js";
+import { strings } from "./i18n/en.js";
+
+const t = strings;
+
+let statusUnsubscribe = null;
 
 export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
   if (!tweetsToInsert || !tweetsToInsert.length) return [];
@@ -26,14 +38,12 @@ export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
   const fragment = document.createDocumentFragment();
   const cards = [];
 
-  // For prepend we build in natural order but will insert reversed to keep visual order
   if (prepend) {
     for (const t of tweetsToInsert) {
       const card = await createCard(t);
       card.style.visibility = "hidden";
       cards.push(card);
     }
-    // Insert in reverse so first tweet becomes first DOM child
     for (let i = cards.length - 1; i >= 0; i--) {
       grid.insertBefore(cards[i], grid.firstChild);
     }
@@ -64,41 +74,135 @@ export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
 async function loadMoreTweets() {
   const tweets = getTweets();
   let loadedCount = getLoadedCount();
+
+  if (loadedCount >= tweets.length) {
+    return;
+  }
+
+  setStatus(STATUS.LOADING_MORE, t.status.loadingMore);
+
   const end = Math.min(loadedCount + BATCH_SIZE, tweets.length);
   const slice = tweets.slice(loadedCount, end);
   await insertTweets(slice, { prepend: false });
   addLoadedCount(end - loadedCount);
+
+  setStatus(STATUS.IDLE);
+}
+
+function createStatusIndicator() {
+  const indicator = document.createElement("div");
+  indicator.id = "status-indicator";
+  indicator.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 24px;
+    font-size: 14px;
+    z-index: 999;
+    display: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  `;
+  document.body.appendChild(indicator);
+  return indicator;
+}
+
+function updateStatusDisplay(indicator, { status, message }) {
+  if (status === STATUS.IDLE) {
+    indicator.style.opacity = "0";
+    setTimeout(() => {
+      indicator.style.display = "none";
+    }, 300);
+  } else {
+    indicator.style.display = "block";
+    indicator.textContent = message;
+    setTimeout(() => {
+      indicator.style.opacity = "1";
+    }, 10);
+  }
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  // Start WebSocket connection immediately so server knows client is active
-  setupWebSocketPing();
+  const statusIndicator = createStatusIndicator();
+
+  statusUnsubscribe = onStatusChange((statusUpdate) => {
+    updateStatusDisplay(statusIndicator, statusUpdate);
+  });
+
+  // Initialize settings
+  await initSettings();
+  setupSettingsButton();
+
+  // Handle server shutdown on page close
+  window.addEventListener("beforeunload", async (e) => {
+    if (statusUnsubscribe) statusUnsubscribe();
+
+    try {
+      const configRes = await fetch("/config");
+      const config = await configRes.json();
+      if (config.server?.closeOnPageClose) {
+        await fetch("/shutdown", { method: "POST" });
+      }
+    } catch (err) {
+      console.warn("Could not check shutdown setting:", err);
+    }
+  });
+
+  setStatus(STATUS.LOADING_INITIAL, t.status.loadingInitial);
 
   try {
     const data = await fetchTweetsData();
+    console.log("[DEBUG] Fetched tweets:", data.length, "tweets");
     setTweets(data);
   } catch (e) {
     console.warn("data.json missing/unreadable, attempting refresh...", e);
   }
 
   let tweets = getTweets();
+  console.log("[DEBUG] After load, tweets:", tweets.length);
   if (!tweets.length) {
+    setStatus(STATUS.LOADING_INITIAL, t.status.downloadingTweets);
     try {
-      await fetch("/refresh", { method: "POST" });
-      const data = await fetchTweetsData();
-      setTweets(data);
+      await refreshAndFetchData(true);
       tweets = getTweets();
     } catch (e) {
       console.error("Failed to refresh tweets:", e);
+      setStatus(STATUS.ERROR, t.status.error);
       const grid = document.getElementById("grid");
-      if (grid)
-        grid.innerHTML = "<p>Error loading tweets. Please try again later.</p>";
+      if (grid) {
+        grid.innerHTML = `<p style='padding: 20px; text-align: center;'>${t.status.errorRetry}</p>`;
+      }
       return;
     }
   }
 
-  // Setup UI components
   setupResizeListener();
   setupLazyLoad(loadMoreTweets);
   setupRefreshButton(insertTweets);
+
+  if (tweets.length > 0) {
+    const initialSlice = tweets.slice(0, BATCH_SIZE);
+    console.log(
+      "[DEBUG] Inserting initial batch:",
+      initialSlice.length,
+      "cards",
+    );
+    await insertTweets(initialSlice, { prepend: false });
+    console.log(
+      "[DEBUG] Cards inserted, setting loadedCount to:",
+      initialSlice.length,
+    );
+    setLoadedCount(initialSlice.length);
+    console.log(
+      "[DEBUG] Grid HTML:",
+      document.getElementById("grid")?.innerHTML?.substring(0, 100),
+    );
+  }
+
+  setStatus(STATUS.IDLE);
+  console.log("[DEBUG] Page load complete");
 });
