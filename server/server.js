@@ -110,6 +110,13 @@ app.post("/config", async (req, res) => {
     config.server = { ...config.server, ...updates.server };
   }
 
+  if (updates.webp_conversion) {
+    if (typeof updates.webp_conversion !== "object") {
+      return res.status(400).json({ error: "webp_conversion must be an object" });
+    }
+    config.webp_conversion = { ...config.webp_conversion, ...updates.webp_conversion };
+  }
+
   const saved = await saveConfig(config);
   if (!saved) {
     return res.status(500).json({ error: "Failed to save config" });
