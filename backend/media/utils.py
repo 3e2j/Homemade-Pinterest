@@ -13,6 +13,10 @@ from backend.settings import (
     OUTPUT_DIR,
 )
 
+# Ensure media directories exist
+for folder in MEDIA_DIRS:
+    folder.mkdir(parents=True, exist_ok=True)
+
 
 def load_json_file(path: Path, default: Any):
     """Load JSON from path or return default on any error."""

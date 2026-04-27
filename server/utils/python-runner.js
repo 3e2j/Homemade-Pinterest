@@ -17,7 +17,11 @@ function isSafeScriptPath(scriptPath) {
     return false;
   }
   // Only allow paths within backend/ folder
-  return scriptPath.includes("backend/") && !scriptPath.includes("..") && !scriptPath.includes(";");
+  return (
+    scriptPath.includes("backend/") &&
+    !scriptPath.includes("..") &&
+    !scriptPath.includes(";")
+  );
 }
 
 /**
@@ -66,8 +70,8 @@ export function runPythonScript(scriptPath, args = []) {
       } else {
         reject(
           new Error(
-            `Python script exited with code ${code}: ${stderr || "No error output"}`
-          )
+            `Python script exited with code ${code}: ${stderr || "No error output"}`,
+          ),
         );
       }
     });

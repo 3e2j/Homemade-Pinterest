@@ -6,6 +6,7 @@ from enum import Enum
 
 class LogLevel(Enum):
     """Log level enumeration."""
+
     DEBUG = 0
     INFO = 1
     WARNING = 2
@@ -20,11 +21,16 @@ class Logger:
         self.level = level
 
     def _log(self, level: LogLevel, message: str) -> None:
-        """Write log message to stderr with level indicator."""
+        """Write log message to stdout (INFO/DEBUG/WARNING) or stderr (ERROR)."""
         if level.value < self.level.value:
             return
         level_str = level.name
-        print(f"{self.prefix} [{level_str}] {message}", file=sys.stderr)
+        output = f"{self.prefix} [{level_str}] {message}"
+        # Only errors go to stderr; info/debug/warning go to stdout
+        if level == LogLevel.ERROR:
+            print(output, file=sys.stderr)
+        else:
+            print(output, file=sys.stdout)
 
     def debug(self, message: str) -> None:
         """Log debug message."""

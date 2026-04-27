@@ -22,19 +22,28 @@ AVATAR_DIR = MEDIA_ROOT_DIR / "avatars"
 
 MEDIA_DIRS = [IMAGE_DIR, VIDEO_DIR, AVATAR_DIR]
 
-for folder in MEDIA_DIRS:
-    folder.mkdir(parents=True, exist_ok=True)
-
 MAX_MEDIA_PER_TWEET = 4
+
+DOWNLOAD_MAX_RETRIES = 3
 COMPATIBLE_WEBP_EXTS = {".jpg", ".jpeg", ".png"}
 VIDEO_EXTS = {".mp4", ".webm", ".mov"}
 HASH_CHUNK_SIZE = 65536
+
+# WebP validation constraints
+WEBP_QUALITY_MIN = 1
+WEBP_QUALITY_MAX = 100
+WEBP_METHOD_MIN = 0
+WEBP_METHOD_MAX = 6
+
+# WebP fallback defaults
+WEBP_QUALITY_DEFAULT = 80
+WEBP_METHOD_DEFAULT = 6
 
 JSON_INDENT = 2
 
 DATA_ENDPOINT = "data.json"
 
-# Config defaults
+# Config defaults (INPUT schema)
 _DEFAULT_CONFIG = {
     "webp_conversion": {
         "enabled": True,
@@ -42,33 +51,55 @@ _DEFAULT_CONFIG = {
         "method": 6,
     },
     "server": {
-        "closeOnPageClose": False,
+        "closeOnPageClose": True,
     },
 }
 
 
-def _validate_webp_config(config: dict) -> dict:
-    """Validate and normalize WebP configuration."""
-    webp_config = config.get("webp_conversion", {})
+def _validate_config(config: dict) -> dict:
+    """Validate and normalize full configuration."""
 
+    return {
+        "webp": _validate_webp_config(
+            config.get("webp_conversion"),
+            _DEFAULT_CONFIG["webp_conversion"],
+        ),
+        "server": _validate_server_config(
+            config.get("server"),
+            _DEFAULT_CONFIG["server"],
+        ),
+    }
+
+
+def _validate_webp_config(webp_config: dict | None, defaults: dict) -> dict:
     if not isinstance(webp_config, dict):
-        error("webp_conversion must be a dictionary")
+        error("webp_conversion must be a dictionary, using defaults")
         webp_config = {}
 
-    enabled = webp_config.get("enabled", True)
+    enabled = webp_config.get("enabled", defaults["enabled"])
     if not isinstance(enabled, bool):
-        error(f"webp_conversion.enabled must be boolean, got {type(enabled).__name__}")
-        enabled = True
+        error(
+            f"webp_conversion.enabled must be boolean, got {type(enabled).__name__}, using {defaults['enabled']}"
+        )
+        enabled = defaults["enabled"]
 
-    quality = webp_config.get("quality", 80)
-    if not isinstance(quality, int) or quality < 1 or quality > 100:
-        error(f"webp_conversion.quality must be int 1-100, got {quality}")
-        quality = 80
+    quality = webp_config.get("quality", defaults["quality"])
+    if not isinstance(quality, int) or not (
+        WEBP_QUALITY_MIN <= quality <= WEBP_QUALITY_MAX
+    ):
+        error(
+            f"webp_conversion.quality must be int {WEBP_QUALITY_MIN}-{WEBP_QUALITY_MAX}, got {quality}, using {defaults['quality']}"
+        )
+        quality = defaults["quality"]
 
-    method = webp_config.get("method", 6)
-    if not isinstance(method, int) or method < 0 or method > 6:
-        error(f"webp_conversion.method must be int 0-6, got {method}")
-        method = 6
+    method = webp_config.get("method", defaults["method"])
+    if not isinstance(method, int) or not (
+        WEBP_METHOD_MIN <= method <= WEBP_METHOD_MAX
+    ):
+        error(
+            f"webp_conversion.method must be int {WEBP_METHOD_MIN}-{WEBP_METHOD_MAX}, got {method}, using {defaults['method']}"
+        )
+        method = defaults["method"]
 
     return {
         "enabled": enabled,
@@ -77,54 +108,58 @@ def _validate_webp_config(config: dict) -> dict:
     }
 
 
-def _validate_server_config(config: dict) -> dict:
-    """Validate and normalize server configuration."""
-    server_config = config.get("server", {})
-
+def _validate_server_config(server_config: dict | None, defaults: dict) -> dict:
     if not isinstance(server_config, dict):
-        error("server must be a dictionary")
+        error("server must be a dictionary, using defaults")
         server_config = {}
 
-    close_on_page_close = server_config.get("closeOnPageClose", False)
+    close_on_page_close = server_config.get(
+        "closeOnPageClose", defaults["closeOnPageClose"]
+    )
     if not isinstance(close_on_page_close, bool):
         error(
-            f"server.closeOnPageClose must be boolean, got {type(close_on_page_close).__name__}"
+            f"server.closeOnPageClose must be boolean, got {type(close_on_page_close).__name__}, using {defaults['closeOnPageClose']}"
         )
-        close_on_page_close = False
+        close_on_page_close = defaults["closeOnPageClose"]
 
     return {
         "closeOnPageClose": close_on_page_close,
     }
 
 
-try:
-    with open(CONFIG_FILE, encoding="utf8") as f:
-        _config = json.load(f)
+def _load_config() -> dict:
+    """Load and validate configuration from file, or return defaults on any error."""
 
-    if not isinstance(_config, dict):
-        error(f"config.json must be a dictionary, got {type(_config).__name__}")
-        _config = _DEFAULT_CONFIG
+    try:
+        with open(CONFIG_FILE, encoding="utf8") as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        error(f"Config file not found: {CONFIG_FILE}, using defaults")
+        return _validate_config(_DEFAULT_CONFIG)
+    except json.JSONDecodeError as e:
+        error(f"Failed to parse {CONFIG_FILE}: {e}, using defaults")
+        return _validate_config(_DEFAULT_CONFIG)
+    except Exception as e:
+        error(f"Unexpected error loading {CONFIG_FILE}: {e}, using defaults")
+        return _validate_config(_DEFAULT_CONFIG)
 
-    # Validate each section
-    _webp_config = _validate_webp_config(_config)
-    _server_config = _validate_server_config(_config)
+    if not isinstance(config, dict):
+        error(
+            f"config.json must be a dictionary, got {type(config).__name__}, using defaults"
+        )
+        return _validate_config(_DEFAULT_CONFIG)
 
+    validated = _validate_config(config)
     info(f"Loaded config from {CONFIG_FILE}")
+    return validated
 
-except FileNotFoundError:
-    error(f"Config file not found: {CONFIG_FILE}")
-    _webp_config = _DEFAULT_CONFIG["webp_conversion"]
-    _server_config = _DEFAULT_CONFIG["server"]
-except json.JSONDecodeError as e:
-    error(f"Failed to parse {CONFIG_FILE}: {e}")
-    _webp_config = _DEFAULT_CONFIG["webp_conversion"]
-    _server_config = _DEFAULT_CONFIG["server"]
-except Exception as e:
-    error(f"Unexpected error loading {CONFIG_FILE}: {e}")
-    _webp_config = _DEFAULT_CONFIG["webp_conversion"]
-    _server_config = _DEFAULT_CONFIG["server"]
 
-# WebP conversion settings
-WEBP_ENABLED = _webp_config.get("enabled", True)
-WEBP_QUALITY = _webp_config.get("quality", 80)
-WEBP_METHOD = _webp_config.get("method", 6)
+_config = _load_config()
+
+# WebP conversion settings (guaranteed valid)
+WEBP_ENABLED = _config["webp"]["enabled"]
+WEBP_QUALITY = _config["webp"]["quality"]
+WEBP_METHOD = _config["webp"]["method"]
+
+# Server settings (guaranteed valid)
+SERVER_CLOSE_ON_PAGE_CLOSE = _config["server"]["closeOnPageClose"]

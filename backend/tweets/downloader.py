@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
-from backend.logger import error, info, warning
+from backend.logger import error, warning
+from backend.settings import DOWNLOAD_MAX_RETRIES
 
 load_dotenv()
 
@@ -72,7 +73,7 @@ class XAPIClient:
         self.header_authorization = os.getenv(ENV_AUTHORIZATION)
         self.header_cookie = os.getenv(ENV_COOKIES)
         self.header_csrf = os.getenv(ENV_CSRF)
-        
+
         # Validate credentials are present
         if not self.x_user_id:
             error(f"Missing {ENV_USER_ID} in environment")
@@ -89,27 +90,47 @@ class XAPIClient:
         """Fetches a single page of likes from X API."""
         variables_data_encoded = json.dumps(self._build_variables(cursor=cursor))
         features_data_encoded = json.dumps(self._build_features())
-        try:
-            response = requests.get(
-                LIKES_URL,
-                params={
-                    "variables": variables_data_encoded,
-                    "features": features_data_encoded,
-                },
-                headers=self._build_headers(),
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            return self.extract_entries(response.json())
-        except requests.exceptions.Timeout:
-            error("API request timed out")
-            return None
-        except requests.exceptions.HTTPError as e:
-            error(f"API HTTP error: {e.response.status_code} - {e.response.text[:200]}")
-            return None
-        except Exception as e:
-            error(f"Failed to fetch likes page: {e}")
-            return None
+        headers = self._build_headers()
+
+        for attempt in range(DOWNLOAD_MAX_RETRIES):
+            try:
+                response = requests.get(
+                    LIKES_URL,
+                    params={
+                        "variables": variables_data_encoded,
+                        "features": features_data_encoded,
+                    },
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                return self.extract_entries(response.json())
+            except Exception as e:
+                # Check if error is transient
+                is_transient = isinstance(
+                    e,
+                    (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+                )
+
+                # Special handling for HTTP errors
+                if not is_transient and isinstance(e, requests.exceptions.HTTPError):
+                    status = e.response.status_code if e.response else None
+                    is_transient = status in (429, 500, 502, 503, 504)
+                    if not is_transient:
+                        error(f"API HTTP {status}")
+                        return None
+
+                # Non-transient error
+                if not is_transient:
+                    error(f"Failed to fetch likes page: {e}")
+                    return None
+
+                # Retry transient errors without delay
+                if attempt == DOWNLOAD_MAX_RETRIES - 1:
+                    error(f"Transient error after {DOWNLOAD_MAX_RETRIES} attempts: {e}")
+                    return None
+
+        return None
 
     def extract_entries(
         self, raw_data: Dict[str, Any]
@@ -119,12 +140,12 @@ class XAPIClient:
             if not isinstance(raw_data, dict):
                 error(f"API response must be dict, got {type(raw_data).__name__}")
                 return None
-            
+
             user_result = raw_data.get("data", {}).get("user", {}).get("result")
             if not isinstance(user_result, dict):
                 error("Invalid API response: cannot find user result")
                 return None
-            
+
             timeline = user_result.get("timeline_v2", {}).get("timeline")
             if not isinstance(timeline, dict):
                 timeline = user_result.get("timeline", {}).get("timeline")
@@ -161,7 +182,7 @@ class XAPIClient:
         """Extracts pagination cursor from page entries."""
         if not isinstance(page_json, list):
             return None
-        
+
         for entry in reversed(page_json):
             if not isinstance(entry, dict):
                 continue

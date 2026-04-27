@@ -11,6 +11,7 @@ import requests
 from backend.logger import error, info
 from backend.settings import (
     AVATAR_DIR,
+    DOWNLOAD_MAX_RETRIES,
     IMAGE_DIR,
     VIDEO_DIR,
     VIDEO_EXTS,
@@ -32,43 +33,64 @@ def get_media_folder_dir(url: str) -> Path:
     return VIDEO_DIR if ext in VIDEO_EXTS else IMAGE_DIR
 
 
+def _is_transient_error(exc: Exception) -> bool:
+    """Check if error is transient (should retry)."""
+    if isinstance(
+        exc, (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+    ):
+        return True
+    if isinstance(exc, requests.exceptions.HTTPError):
+        status = exc.response.status_code if exc.response else None
+        return status in (429, 500, 502, 503, 504)
+    return False
+
+
 def download_single_file(url: str, folder: Path) -> Optional[str]:
     """Download `url` into `folder` and return the stored relative path or None.
 
     Saves file using URL stem naming: {url_stem}.{ext}
     Returns relative path like 'folder/filename.jpg'
+    Retries on transient network errors.
+    Cleans up partial files on failure to avoid corruption.
     """
     if not url or not isinstance(url, str):
         return None
 
-    try:
-        path = Path(urlparse(url).path)
-        url_stem = path.stem
-        ext = path.suffix
-        
-        if not url_stem or not ext:
-            return None
-        
-        file_path = folder / f"{url_stem}{ext}"
+    path = Path(urlparse(url).path)
+    url_stem = path.stem
+    ext = path.suffix
 
-        resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS, stream=True)
-        resp.raise_for_status()
-        
-        with file_path.open("wb") as out_f:
-            for chunk in resp.iter_content(chunk_size=DOWNLOAD_STREAM_CHUNK):
-                if chunk:
-                    out_f.write(chunk)
-        
-        return f"{folder.name}/{file_path.name}"
-    except requests.exceptions.Timeout:
-        error(f"Download timeout: {url}")
+    if not url_stem or not ext:
         return None
-    except requests.exceptions.RequestException as e:
-        error(f"Download failed for {url}: {e}")
-        return None
-    except Exception as e:
-        error(f"Failed to download {url}: {e}")
-        return None
+
+    file_path = folder / f"{url_stem}{ext}"
+
+    for attempt in range(DOWNLOAD_MAX_RETRIES):
+        try:
+            resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS, stream=True)
+            resp.raise_for_status()
+
+            with file_path.open("wb") as out_f:
+                for chunk in resp.iter_content(chunk_size=DOWNLOAD_STREAM_CHUNK):
+                    if chunk:
+                        out_f.write(chunk)
+
+            return f"{folder.name}/{file_path.name}"
+        except Exception as e:
+            file_path.unlink(missing_ok=True)
+
+            if not _is_transient_error(e):
+                status = ""
+                if isinstance(e, requests.exceptions.HTTPError) and e.response:
+                    status = f" {e.response.status_code}"
+                error(f"Download failed{status}: {url}")
+                return None
+
+            if attempt == DOWNLOAD_MAX_RETRIES - 1:
+                error(f"Download failed after {DOWNLOAD_MAX_RETRIES} attempts: {url}")
+                return None
+
+    return None
 
 
 def download_bulk_media(
