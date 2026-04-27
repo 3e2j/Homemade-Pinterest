@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import requests
 
+from backend.logger import error, info
 from backend.settings import (
     AVATAR_DIR,
     IMAGE_DIR,
@@ -26,6 +27,7 @@ DOWNLOAD_STREAM_CHUNK = 8192
 
 
 def get_media_folder_dir(url: str) -> Path:
+    """Determine media type folder (images/videos) from URL extension."""
     ext = Path(urlparse(url).path).suffix.lower()
     return VIDEO_DIR if ext in VIDEO_EXTS else IMAGE_DIR
 
@@ -36,25 +38,36 @@ def download_single_file(url: str, folder: Path) -> Optional[str]:
     Saves file using URL stem naming: {url_stem}.{ext}
     Returns relative path like 'folder/filename.jpg'
     """
-    if not url:
+    if not url or not isinstance(url, str):
         return None
 
-    path = Path(urlparse(url).path)
-    url_stem = path.stem
-    ext = path.suffix
-    file_path = folder / f"{url_stem}{ext}"
-
     try:
+        path = Path(urlparse(url).path)
+        url_stem = path.stem
+        ext = path.suffix
+        
+        if not url_stem or not ext:
+            return None
+        
+        file_path = folder / f"{url_stem}{ext}"
+
         resp = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS, stream=True)
         resp.raise_for_status()
+        
         with file_path.open("wb") as out_f:
             for chunk in resp.iter_content(chunk_size=DOWNLOAD_STREAM_CHUNK):
                 if chunk:
                     out_f.write(chunk)
-        # print(f"[Download] Saved: {url} -> {file_path.name}")
+        
         return f"{folder.name}/{file_path.name}"
+    except requests.exceptions.Timeout:
+        error(f"Download timeout: {url}")
+        return None
+    except requests.exceptions.RequestException as e:
+        error(f"Download failed for {url}: {e}")
+        return None
     except Exception as e:
-        print(f"[Download] Failed: {url} ({e})")
+        error(f"Failed to download {url}: {e}")
         return None
 
 
@@ -64,8 +77,7 @@ def download_bulk_media(
 ) -> Dict[str, Optional[str]]:
     """Download unique URLs from `url_folder_pairs` using a thread pool.
 
-    Returns a tuple of (url->filename map, list of failed URLs).
-    IE: ({'https://pbs.twimg.com/...': 'avatars/filename.png'}, ['https://failed.com/...'])
+    Returns a dict of (url->filename map).
     Each unique URL is downloaded at most once.
     """
     if not url_folder_pairs:
@@ -78,10 +90,10 @@ def download_bulk_media(
     # Deduplicate input; only download one URL once.
     unique_pairs: Dict[str, Path] = {}
     for url, folder in url_folder_pairs:
-        if url:
+        if url and isinstance(url, str):
             unique_pairs.setdefault(url, folder)
 
-    # url -> saved filepath, track failures separately
+    # url -> saved filepath
     results: Dict[str, Optional[str]] = {}
     failed_urls = 0
 
@@ -94,12 +106,16 @@ def download_bulk_media(
         }
         for future in as_completed(futures):
             url = futures[future]
-            result = future.result()
-            results[url] = result
-            if result is None:
+            try:
+                result = future.result()
+                results[url] = result
+                if result is None:
+                    failed_urls += 1
+            except Exception as e:
+                error(f"Unexpected error downloading {url}: {e}")
+                results[url] = None
                 failed_urls += 1
 
-    print(
-        f"[Download] Media download complete ({len(results) - failed_urls}/{len(results)} succeeded)"
-    )
+    succeeded = len(results) - failed_urls
+    info(f"Media download complete ({succeeded}/{len(results)} succeeded)")
     return results

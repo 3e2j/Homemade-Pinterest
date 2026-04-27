@@ -156,14 +156,12 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   try {
     const data = await fetchTweetsData();
-    console.log("[DEBUG] Fetched tweets:", data.length, "tweets");
     setTweets(data);
   } catch (e) {
     console.warn("data.json missing/unreadable, attempting refresh...", e);
   }
 
   let tweets = getTweets();
-  console.log("[DEBUG] After load, tweets:", tweets.length);
   if (!tweets.length) {
     setStatus(STATUS.LOADING_INITIAL, t.status.downloadingTweets);
     try {
@@ -186,23 +184,9 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   if (tweets.length > 0) {
     const initialSlice = tweets.slice(0, BATCH_SIZE);
-    console.log(
-      "[DEBUG] Inserting initial batch:",
-      initialSlice.length,
-      "cards",
-    );
     await insertTweets(initialSlice, { prepend: false });
-    console.log(
-      "[DEBUG] Cards inserted, setting loadedCount to:",
-      initialSlice.length,
-    );
     setLoadedCount(initialSlice.length);
-    console.log(
-      "[DEBUG] Grid HTML:",
-      document.getElementById("grid")?.innerHTML?.substring(0, 100),
-    );
   }
 
   setStatus(STATUS.IDLE);
-  console.log("[DEBUG] Page load complete");
 });

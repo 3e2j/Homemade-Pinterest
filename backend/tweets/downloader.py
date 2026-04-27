@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+from backend.logger import error, info, warning
+
 load_dotenv()
 
 ENV_USER_ID = "USER_ID"
@@ -70,6 +72,16 @@ class XAPIClient:
         self.header_authorization = os.getenv(ENV_AUTHORIZATION)
         self.header_cookie = os.getenv(ENV_COOKIES)
         self.header_csrf = os.getenv(ENV_CSRF)
+        
+        # Validate credentials are present
+        if not self.x_user_id:
+            error(f"Missing {ENV_USER_ID} in environment")
+        if not self.header_authorization:
+            error(f"Missing {ENV_AUTHORIZATION} in environment")
+        if not self.header_cookie:
+            error(f"Missing {ENV_COOKIES} in environment")
+        if not self.header_csrf:
+            error(f"Missing {ENV_CSRF} in environment")
 
     def fetch_likes_page(
         self, cursor: Optional[str] = None
@@ -89,8 +101,14 @@ class XAPIClient:
             )
             response.raise_for_status()
             return self.extract_entries(response.json())
+        except requests.exceptions.Timeout:
+            error("API request timed out")
+            return None
+        except requests.exceptions.HTTPError as e:
+            error(f"API HTTP error: {e.response.status_code} - {e.response.text[:200]}")
+            return None
         except Exception as e:
-            print(f"Failed to fetch likes page: {e}")
+            error(f"Failed to fetch likes page: {e}")
             return None
 
     def extract_entries(
@@ -98,17 +116,25 @@ class XAPIClient:
     ) -> Optional[List[Dict[str, Any]]]:
         """Extracts tweet entries from X API response."""
         try:
-            user_result = raw_data["data"]["user"]["result"]
+            if not isinstance(raw_data, dict):
+                error(f"API response must be dict, got {type(raw_data).__name__}")
+                return None
+            
+            user_result = raw_data.get("data", {}).get("user", {}).get("result")
+            if not isinstance(user_result, dict):
+                error("Invalid API response: cannot find user result")
+                return None
+            
             timeline = user_result.get("timeline_v2", {}).get("timeline")
             if not isinstance(timeline, dict):
                 timeline = user_result.get("timeline", {}).get("timeline")
             if not isinstance(timeline, dict):
-                print("Failed to extract likes entries from response.")
+                error("Invalid API response: cannot find timeline")
                 return None
 
             instructions = timeline.get("instructions", [])
             if not isinstance(instructions, list):
-                print("Failed to extract likes entries from response.")
+                error("Invalid API response: instructions must be list")
                 return None
 
             entries: List[Dict[str, Any]] = []
@@ -124,15 +150,18 @@ class XAPIClient:
                     )
 
             if not entries:
-                print("Failed to extract likes entries from response.")
+                warning("API response contains no entries")
                 return None
             return entries
-        except (KeyError, TypeError):
-            print("Failed to extract likes entries from response.")
+        except (KeyError, TypeError) as e:
+            error(f"Failed to parse API response: {e}")
             return None
 
     def get_cursor(self, page_json: List[Dict[str, Any]]) -> Optional[str]:
         """Extracts pagination cursor from page entries."""
+        if not isinstance(page_json, list):
+            return None
+        
         for entry in reversed(page_json):
             if not isinstance(entry, dict):
                 continue
@@ -148,7 +177,10 @@ class XAPIClient:
         """Builds request variables for likes API call."""
         variables_data = {"userId": self.x_user_id, **LIKES_VARIABLES_BASE}
         if cursor:
-            variables_data["cursor"] = cursor
+            if not isinstance(cursor, str):
+                warning(f"Cursor must be string, got {type(cursor).__name__}")
+            else:
+                variables_data["cursor"] = cursor
         return variables_data
 
     def _build_headers(self) -> Dict[str, str]:

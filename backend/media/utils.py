@@ -4,15 +4,13 @@ import json
 from hashlib import md5
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urlparse
 
+from backend.logger import error, warning
 from backend.settings import (
-    COMPATIBLE_WEBP_EXTS,
     HASH_CHUNK_SIZE,
     MEDIA_DIRS,
     MEDIA_ROOT_DIR,
     OUTPUT_DIR,
-    VIDEO_EXTS,
 )
 
 
@@ -22,8 +20,10 @@ def load_json_file(path: Path, default: Any):
         try:
             with open(path, "r", encoding="utf8") as f:
                 return json.load(f)
+        except json.JSONDecodeError as e:
+            error(f"Failed to parse JSON from {path}: {e}")
         except Exception as e:
-            print(f"Failed to load {path}: {e}")
+            error(f"Failed to load {path}: {e}")
     return default
 
 
@@ -32,9 +32,9 @@ def save_json_file(path: Path, data: Any):
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf8") as f:
-            json.dump(data, f)
+            json.dump(data, f, indent=2)
     except Exception as e:
-        print(f"Failed to save {path}: {e}")
+        error(f"Failed to save {path}: {e}")
 
 
 def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
@@ -46,57 +46,62 @@ def compute_file_hash(filepath: Path, chunk_size: int = HASH_CHUNK_SIZE) -> str:
                 h.update(chunk)
         return h.hexdigest()
     except Exception as e:
-        print(f"Failed to hash {filepath}: {e}")
+        error(f"Failed to hash {filepath}: {e}")
         return ""
 
 
 def path_to_output_rel(filepath: Path) -> str:
     """Convert filepath to output-relative path string."""
+    try:
+        return filepath.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+    except ValueError as e:
+        error(f"Path {filepath} is not relative to {OUTPUT_DIR}: {e}")
+        return ""
 
-    return filepath.resolve().relative_to(OUTPUT_DIR.resolve()).as_posix()
+
+def _is_safe_path(path: Path, allowed_parent: Path) -> bool:
+    """Check if path is within allowed_parent (prevents path traversal)."""
+    try:
+        path.resolve().relative_to(allowed_parent.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def resolve_mapped_path(mapped: str) -> Optional[Path]:
-    """Resolve cached path string to actual filesystem path."""
+    """Resolve cached path string to actual filesystem path.
 
+    Validates that resolved path is within OUTPUT_DIR to prevent path traversal attacks.
+    """
     if not mapped:
         return None
 
-    mapped_path = Path(mapped)
-    if mapped_path.is_absolute():
-        return mapped_path if mapped_path.exists() else None
+    try:
+        mapped_path = Path(mapped)
 
-    direct = (OUTPUT_DIR / mapped_path).resolve()
-    if direct.exists():
-        return direct
+        # Prevent absolute paths outside OUTPUT_DIR
+        if mapped_path.is_absolute():
+            if _is_safe_path(mapped_path, OUTPUT_DIR) and mapped_path.exists():
+                return mapped_path
+            return None
 
-    media_rel = (MEDIA_ROOT_DIR / mapped_path).resolve()
-    if media_rel.exists():
-        return media_rel
+        # Try output directory
+        direct = (OUTPUT_DIR / mapped_path).resolve()
+        if _is_safe_path(direct, OUTPUT_DIR) and direct.exists():
+            return direct
 
-    for folder in MEDIA_DIRS:
-        candidate = folder / mapped
-        if candidate.exists():
-            return candidate
+        # Try media root
+        media_rel = (MEDIA_ROOT_DIR / mapped_path).resolve()
+        if _is_safe_path(media_rel, OUTPUT_DIR) and media_rel.exists():
+            return media_rel
 
-    return None
+        # Try individual media folders
+        for folder in MEDIA_DIRS:
+            candidate = (folder / mapped).resolve()
+            if _is_safe_path(candidate, OUTPUT_DIR) and candidate.exists():
+                return candidate
 
-
-def get_media_type(url: str) -> str:
-    """Determine media type (images/videos/avatars) from URL."""
-
-    ext = Path(urlparse(url).path).suffix.lower()
-    if ext in VIDEO_EXTS:
-        return "videos"
-    elif ext in COMPATIBLE_WEBP_EXTS:
-        return "images"
-    return "images"
-
-
-def url_to_filename(url: str) -> str:
-    """Extract original filename from URL (last part of path)."""
-
-    if not url:
-        return ""
-    path = urlparse(url).path
-    return Path(path).name or "unknown"
+        return None
+    except Exception as e:
+        warning(f"Error resolving path {mapped}: {e}")
+        return None

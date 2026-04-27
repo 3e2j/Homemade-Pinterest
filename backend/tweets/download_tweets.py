@@ -2,13 +2,14 @@
 
 from typing import Any, Dict, List, Set
 
+from backend.logger import error, info
 from backend.settings import LIKED_TWEETS_FILE
 from backend.tweets.cache import TweetCache
 from backend.tweets.downloader import XAPIClient
 from backend.tweets.parser import TweetParser
 
 TWEET_ID_KEY = "tweet_id"
-DEFAULT_CONSECUTIVE_SEEN_LIMIT = 80  # 80
+DEFAULT_CONSECUTIVE_SEEN_LIMIT = 80
 
 
 class TweetDownloader:
@@ -40,7 +41,7 @@ class TweetDownloader:
         current_page = 1
 
         while True:
-            print(f"Fetching likes page {current_page}...")
+            info(f"Fetching likes page {current_page}...")
             page = self.api_client.fetch_likes_page(cursor)
             if not page:
                 break
@@ -60,9 +61,7 @@ class TweetDownloader:
 
                 seen_streak += 1
                 if seen_streak >= consecutive_seen_limit:
-                    print(
-                        f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping."
-                    )
+                    info(f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping.")
                     break
 
                 fetched_tweets.append(tweet)
@@ -80,8 +79,8 @@ class TweetDownloader:
 
         if first_run:
             self.cache.save(fetched_tweets)
-            print(f"New tweets: {len(fetched_tweets)}")
-            print(f"Total saved tweets: {len(fetched_tweets)}")
+            info(f"New tweets: {len(fetched_tweets)}")
+            info(f"Total saved tweets: {len(fetched_tweets)}")
             return
 
         # Merge: overwrite the recently fetched window with fresh data,
@@ -114,19 +113,21 @@ class TweetDownloader:
         new_ids = final_ids - existing_ids_before
         removed_ids = existing_ids_before - final_ids
         if len(new_ids) > 0:
-            print(f"New tweets: {len(new_ids)}")
+            info(f"New tweets: {len(new_ids)}")
         if len(removed_ids) > 0:
-            print(f"Tweets removed: {len(removed_ids)}")
-        print(f"Total saved tweets: {len(deduped)}")
+            info(f"Tweets removed: {len(removed_ids)}")
+        info(f"Total saved tweets: {len(deduped)}")
 
 
 def main():
-    downloader = TweetDownloader()
-    print(
-        f"Starting retrieval of likes for X user {downloader.api_client.x_user_id}..."
-    )
-    downloader.retrieve_all_likes()
-    print(f"Done. Likes JSON saved to: {LIKED_TWEETS_FILE}")
+    try:
+        downloader = TweetDownloader()
+        info(f"Starting retrieval of likes for X user {downloader.api_client.x_user_id}...")
+        downloader.retrieve_all_likes()
+        info(f"Done. Likes JSON saved to: {LIKED_TWEETS_FILE}")
+    except Exception as e:
+        error(f"Failed to retrieve tweets: {e}")
+        raise
 
 
 if __name__ == "__main__":

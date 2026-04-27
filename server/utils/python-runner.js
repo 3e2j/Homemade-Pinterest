@@ -1,4 +1,4 @@
-/** Python subprocess spawner and SSE formatter. */
+/** Python subprocess spawner with error handling. */
 
 import { spawn } from "child_process";
 import { join } from "path";
@@ -8,12 +8,33 @@ import { dirname } from "path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /**
+ * Validate that a script path is safe (prevent command injection)
+ * @param {string} scriptPath - Path to Python script
+ * @returns {boolean} - Whether the path is safe
+ */
+function isSafeScriptPath(scriptPath) {
+  if (!scriptPath || typeof scriptPath !== "string") {
+    return false;
+  }
+  // Only allow paths within backend/ folder
+  return scriptPath.includes("backend/") && !scriptPath.includes("..") && !scriptPath.includes(";");
+}
+
+/**
  * Run Python script and return promise with output
  * @param {string} scriptPath - Path to Python script (relative to project root)
  * @param {string[]} args - Arguments to pass to script
  * @returns {Promise<string>} - Stdout from Python process
  */
 export function runPythonScript(scriptPath, args = []) {
+  if (!isSafeScriptPath(scriptPath)) {
+    return Promise.reject(new Error(`Invalid script path: ${scriptPath}`));
+  }
+
+  if (!Array.isArray(args)) {
+    return Promise.reject(new Error("Arguments must be an array"));
+  }
+
   const projectRoot = join(__dirname, "../../");
   const pythonPath = join(projectRoot, ".venv/bin/python");
 
@@ -31,12 +52,12 @@ export function runPythonScript(scriptPath, args = []) {
 
     pythonProcess.stdout.on("data", (data) => {
       stdout += data.toString();
-      console.log("[Python]", data.toString());
+      console.log("[Python]", data.toString().trim());
     });
 
     pythonProcess.stderr.on("data", (data) => {
       stderr += data.toString();
-      console.error("[Python Error]", data.toString());
+      console.error("[Python Error]", data.toString().trim());
     });
 
     pythonProcess.on("close", (code) => {
@@ -45,8 +66,8 @@ export function runPythonScript(scriptPath, args = []) {
       } else {
         reject(
           new Error(
-            `Python script failed with code ${code}: ${stderr || "No error message"}`,
-          ),
+            `Python script exited with code ${code}: ${stderr || "No error output"}`
+          )
         );
       }
     });
