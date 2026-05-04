@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from PIL import Image
 
+from backend.logger import error, warning
 from backend.media.utils import (
     compute_file_hash,
     path_to_output_rel,
@@ -47,7 +48,7 @@ def convert_to_webp(
         filepath.unlink()
         return webp_path
     except Exception as e:
-        print(f"[WebP] Failed to convert {filepath} to webp: {e}")
+        error(f"Failed to convert {filepath} to webp: {e}")
         return filepath
 
 
@@ -67,17 +68,17 @@ def convert_media_files(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, s
 
     for url, rel_filename in url_file_pairs.items():
         if not rel_filename:
-            print("WARNING, rel_filename is missing from pair")
+            warning("Missing rel_filename in url_file_pair")
             continue
 
         filepath = resolve_mapped_path(rel_filename)
         if not filepath or not filepath.exists():
-            print("WARNING, media filepath could not be found or does not exist")
+            warning(f"Media filepath not found or inaccessible: {rel_filename}")
             continue
 
         hashed_path = _get_hashed_path(filepath)
         if hashed_path is None:
-            print("Could not get hashed path for media")
+            warning(f"Could not compute hash for media: {filepath}")
             continue
 
         # Check if file can be converted to WebP
@@ -88,12 +89,20 @@ def convert_media_files(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, s
         else:
             # Duplicate hash, use the one thats already on disk
             if hashed_path.exists():
-                filepath.unlink()
+                try:
+                    filepath.unlink()
+                except Exception as e:
+                    error(f"Failed to delete duplicate file {filepath}: {e}")
             else:
-                filepath.rename(hashed_path)
+                try:
+                    filepath.rename(hashed_path)
+                except Exception as e:
+                    error(f"Failed to rename {filepath} to {hashed_path}: {e}")
+                    continue
             hashed_filename = path_to_output_rel(hashed_path)
 
-        url_to_hashed[url] = hashed_filename
+        if hashed_filename:
+            url_to_hashed[url] = hashed_filename
 
     return url_to_hashed
 

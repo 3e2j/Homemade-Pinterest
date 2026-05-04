@@ -1,3 +1,5 @@
+/** Tweet data and pagination state management. */
+
 export const BATCH_SIZE = 100;
 export const WS_PORT = 8765;
 export const WS_PING_INTERVAL_MS = 5000;

@@ -1,9 +1,14 @@
+/** Tweet card factory with media and user info. */
+
 import {
   SAME_ASPECT_TOLERANCE,
   WIDE_IMAGE_THRESHOLD,
 } from "../../store/store.js";
 import { createAvatarElement } from "./avatar.js";
 import { getMediaSrc, isVideoMedia, createMediaElement } from "./media.js";
+import { strings } from "../../i18n/en.js";
+
+const t = strings;
 
 function createSimpleMediaWrap(src) {
   const wrap = document.createElement("a");
@@ -164,7 +169,7 @@ export async function createCard(tweet) {
   if (isSensitive) {
     hideBtn = document.createElement("button");
     hideBtn.className = "hide-button";
-    hideBtn.textContent = "Hide";
+    hideBtn.textContent = t.card.hide;
     hideBtn.style.display = "none";
     hideBtn.addEventListener("click", (e) => {
       e.preventDefault();

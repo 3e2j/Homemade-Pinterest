@@ -1,12 +1,16 @@
+/** Masonry layout engine for tweet cards. */
+
 import { CARD_WIDTH, COLUMN_GUTTER } from "../../store/store.js";
 
 export function layoutMasonry(container) {
+  if (!container) return;
+
   const gutter = COLUMN_GUTTER;
   const padding = 8; // matches #grid padding in CSS
   const minColumns = 2;
 
   const containerWidth = container.clientWidth;
-  const innerWidth = containerWidth - padding * 2;
+  const innerWidth = Math.max(0, containerWidth - padding * 2);
 
   // Find max columns that can fit without overflow
   let columns = minColumns;
@@ -58,7 +62,8 @@ export function layoutMasonry(container) {
 }
 
 export function setupResizeListener() {
-  window.addEventListener("resize", () =>
-    layoutMasonry(document.getElementById("grid")),
-  );
+  window.addEventListener("resize", () => {
+    const grid = document.getElementById("grid");
+    if (grid) layoutMasonry(grid);
+  });
 }

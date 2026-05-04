@@ -1,5 +1,7 @@
 """Tweet parsing: Extract structured data from X API responses."""
 
+from backend.logger import warning
+
 VIDEO_MEDIA_TYPES = {"video", "animated_gif"}
 MP4_CONTENT_TYPE = "video/mp4"
 
@@ -11,11 +13,16 @@ class TweetParser:
         self._media_urls = None
         self.key_data = {}
 
-        content = (
-            raw_tweet_json.get("content", {})
-            if isinstance(raw_tweet_json, dict)
-            else {}
-        )
+        if not isinstance(raw_tweet_json, dict):
+            warning(f"Tweet must be dict, got {type(raw_tweet_json).__name__}")
+            self.is_valid_tweet = False
+            return
+
+        content = raw_tweet_json.get("content", {})
+        if not isinstance(content, dict):
+            self.is_valid_tweet = False
+            return
+        
         item_content = content.get("itemContent", {})
         if not isinstance(item_content, dict):
             self.is_valid_tweet = False
@@ -101,8 +108,8 @@ class TweetParser:
 
         return best_url
 
-    # Remove query tags ("?" onwards)
     def _strip_query(self, url: str) -> str:
+        """Remove query tags ("?" onwards)"""
         return url.split("?")[0]
 
     def _extract_media_url(self, media_entry):

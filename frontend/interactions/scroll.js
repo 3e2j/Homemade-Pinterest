@@ -1,3 +1,5 @@
+/** Infinite scroll loader for pagination. */
+
 import {
   SCROLL_ROOT_MARGIN,
   getTweets,

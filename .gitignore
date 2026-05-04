@@ -8,3 +8,7 @@ __pycache__
 # Outputs
 output.json
 output/
+# Node dependencies
+node_modules/
+server/node_modules/
+package-lock.json

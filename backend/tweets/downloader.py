@@ -7,6 +7,9 @@ from typing import Any, Dict, List, Optional
 import requests
 from dotenv import load_dotenv
 
+from backend.logger import error, warning
+from backend.settings import DOWNLOAD_MAX_RETRIES
+
 load_dotenv()
 
 ENV_USER_ID = "USER_ID"
@@ -71,44 +74,88 @@ class XAPIClient:
         self.header_cookie = os.getenv(ENV_COOKIES)
         self.header_csrf = os.getenv(ENV_CSRF)
 
+        # Validate credentials are present
+        if not self.x_user_id:
+            error(f"Missing {ENV_USER_ID} in environment")
+        if not self.header_authorization:
+            error(f"Missing {ENV_AUTHORIZATION} in environment")
+        if not self.header_cookie:
+            error(f"Missing {ENV_COOKIES} in environment")
+        if not self.header_csrf:
+            error(f"Missing {ENV_CSRF} in environment")
+
     def fetch_likes_page(
         self, cursor: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
         """Fetches a single page of likes from X API."""
         variables_data_encoded = json.dumps(self._build_variables(cursor=cursor))
         features_data_encoded = json.dumps(self._build_features())
-        try:
-            response = requests.get(
-                LIKES_URL,
-                params={
-                    "variables": variables_data_encoded,
-                    "features": features_data_encoded,
-                },
-                headers=self._build_headers(),
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-            response.raise_for_status()
-            return self.extract_entries(response.json())
-        except Exception as e:
-            print(f"Failed to fetch likes page: {e}")
-            return None
+        headers = self._build_headers()
+
+        for attempt in range(DOWNLOAD_MAX_RETRIES):
+            try:
+                response = requests.get(
+                    LIKES_URL,
+                    params={
+                        "variables": variables_data_encoded,
+                        "features": features_data_encoded,
+                    },
+                    headers=headers,
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                return self.extract_entries(response.json())
+            except Exception as e:
+                # Check if error is transient
+                is_transient = isinstance(
+                    e,
+                    (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+                )
+
+                # Special handling for HTTP errors
+                if not is_transient and isinstance(e, requests.exceptions.HTTPError):
+                    status = e.response.status_code if e.response else None
+                    is_transient = status in (429, 500, 502, 503, 504)
+                    if not is_transient:
+                        error(f"API HTTP {status}")
+                        return None
+
+                # Non-transient error
+                if not is_transient:
+                    error(f"Failed to fetch likes page: {e}")
+                    return None
+
+                # Retry transient errors without delay
+                if attempt == DOWNLOAD_MAX_RETRIES - 1:
+                    error(f"Transient error after {DOWNLOAD_MAX_RETRIES} attempts: {e}")
+                    return None
+
+        return None
 
     def extract_entries(
         self, raw_data: Dict[str, Any]
     ) -> Optional[List[Dict[str, Any]]]:
         """Extracts tweet entries from X API response."""
         try:
-            user_result = raw_data["data"]["user"]["result"]
+            if not isinstance(raw_data, dict):
+                error(f"API response must be dict, got {type(raw_data).__name__}")
+                return None
+
+            user_result = raw_data.get("data", {}).get("user", {}).get("result")
+            if not isinstance(user_result, dict):
+                error("Invalid API response: cannot find user result")
+                return None
+
             timeline = user_result.get("timeline_v2", {}).get("timeline")
             if not isinstance(timeline, dict):
                 timeline = user_result.get("timeline", {}).get("timeline")
             if not isinstance(timeline, dict):
-                print("Failed to extract likes entries from response.")
+                error("Invalid API response: cannot find timeline")
                 return None
 
             instructions = timeline.get("instructions", [])
             if not isinstance(instructions, list):
-                print("Failed to extract likes entries from response.")
+                error("Invalid API response: instructions must be list")
                 return None
 
             entries: List[Dict[str, Any]] = []
@@ -124,15 +171,18 @@ class XAPIClient:
                     )
 
             if not entries:
-                print("Failed to extract likes entries from response.")
+                warning("API response contains no entries")
                 return None
             return entries
-        except (KeyError, TypeError):
-            print("Failed to extract likes entries from response.")
+        except (KeyError, TypeError) as e:
+            error(f"Failed to parse API response: {e}")
             return None
 
     def get_cursor(self, page_json: List[Dict[str, Any]]) -> Optional[str]:
         """Extracts pagination cursor from page entries."""
+        if not isinstance(page_json, list):
+            return None
+
         for entry in reversed(page_json):
             if not isinstance(entry, dict):
                 continue
@@ -148,7 +198,10 @@ class XAPIClient:
         """Builds request variables for likes API call."""
         variables_data = {"userId": self.x_user_id, **LIKES_VARIABLES_BASE}
         if cursor:
-            variables_data["cursor"] = cursor
+            if not isinstance(cursor, str):
+                warning(f"Cursor must be string, got {type(cursor).__name__}")
+            else:
+                variables_data["cursor"] = cursor
         return variables_data
 
     def _build_headers(self) -> Dict[str, str]:

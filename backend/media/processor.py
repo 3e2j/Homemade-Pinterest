@@ -3,6 +3,7 @@
 import json
 from typing import Any, Dict, List
 
+from backend.logger import error, info
 from backend.media.downloader import download_bulk_media, get_media_folder_dir
 from backend.media.transformer import (
     convert_media_files,
@@ -11,9 +12,8 @@ from backend.media.transformer import (
 from backend.media.utils import (
     load_json_file,
     resolve_mapped_path,
+    save_json_file,
 )
-
-# from backend.media.cleaner import cleanup
 from backend.settings import (
     AVATAR_DIR,
     LIKED_TWEETS_FILE,
@@ -46,15 +46,14 @@ def _get_url_folder_pairs(
 
     for tweet in tweets:
         avatar_url = tweet.get("user_avatar_url", "")
-        if avatar_url:
+        if avatar_url and isinstance(avatar_url, str):
             url_folder_pairs.append((avatar_url, AVATAR_DIR))
 
         media_urls = tweet.get("tweet_media_urls", [])[:MAX_MEDIA_PER_TWEET]
         for media_url in media_urls:
-            if not media_url:
-                continue
-            folder = get_media_folder_dir(media_url)
-            url_folder_pairs.append((media_url, folder))
+            if media_url:
+                folder = get_media_folder_dir(media_url)
+                url_folder_pairs.append((media_url, folder))
 
     return url_folder_pairs
 
@@ -111,16 +110,16 @@ def _remove_tweets_and_orphaned_media(
                 resolved.unlink()
                 deleted += 1
         except Exception as e:
-            print(f"[Processor] Failed to delete orphaned file {resolved}: {e}")
+            error(f"Failed to delete orphaned file {resolved}: {e}")
             failed += 1
 
     shared = len(removed_paths) - len(orphaned_paths)
-    print(
-        f"[Processor] Removed {len(removed_tweets)} stale tweets, "
-        f"deleted {deleted} orphaned media files"
-        + (f", {shared} shared files kept" if shared else "")
-        + (f", {failed} deletions failed" if failed else "")
-    )
+    msg = f"Removed {len(removed_tweets)} stale tweets, deleted {deleted} orphaned media files"
+    if shared:
+        msg += f", {shared} shared files kept"
+    if failed:
+        msg += f", {failed} deletions failed"
+    info(msg)
 
     return surviving_tweets, len(removed_tweets)
 
@@ -129,22 +128,19 @@ def main() -> None:
     """Orchestrate media processing: download, cleanup, and transform."""
     raw_tweets = load_json_file(LIKED_TWEETS_FILE, [])
     if not isinstance(raw_tweets, list):
-        raise ValueError("liked_tweets.json must contain a JSON array")
+        error("liked_tweets.json must contain a JSON array")
+        return
 
-    print("[Processor] Filtering tweets...")
+    info("Filtering tweets with media...")
     tweets_with_media = _filter_tweets_with_media(raw_tweets)
     if not tweets_with_media:
-        print("[Processor] No tweets with media found. Exiting.")
+        info("No tweets with media found.")
         return
 
     # Load existing processed data once; reuse throughout
-    existing_tweets = []
-    if PROCESSED_JSON.exists():
-        with open(PROCESSED_JSON, "r", encoding="utf8") as f:
-            try:
-                existing_tweets = json.load(f)
-            except json.JSONDecodeError:
-                existing_tweets = []
+    existing_tweets = load_json_file(PROCESSED_JSON, [])
+    if not isinstance(existing_tweets, list):
+        existing_tweets = []
 
     # Remove unliked tweets
     existing_tweets, removal_count = _remove_tweets_and_orphaned_media(
@@ -155,42 +151,39 @@ def main() -> None:
 
     if not filtered_tweets:
         if removal_count:
-            with open(PROCESSED_JSON, "w", encoding="utf8") as f:
-                json.dump(existing_tweets, f)
-            print("[Processor] No new tweets to add. Saved updated data.json.")
+            save_json_file(PROCESSED_JSON, existing_tweets)
+            info("No new tweets to add. Saved updated data.json.")
         else:
-            print("[Processor] All tweets already exist in data.json. Exiting.")
+            info("All tweets already exist in data.json.")
         return
 
-    print("[Processor] Collecting media URLs...")
+    info("Collecting media URLs...")
     url_folder_pairs = _get_url_folder_pairs(filtered_tweets)
     if not url_folder_pairs:
-        print("[Processor] No URLs to download. Exiting.")
+        info("No URLs to download.")
         return
 
-    print(
-        f"[Processor] Downloading media files ({len(url_folder_pairs)} to download)..."
-    )
+    info(f"Downloading media files ({len(url_folder_pairs)} to download)...")
     url_file_pairs = download_bulk_media(url_folder_pairs)
     if not url_file_pairs:
-        print("[Processor] Failed to download media files. Exiting.")
+        error("Failed to download media files.")
         return
 
     if WEBP_ENABLED:
-        print("[Processor] Converting images to WebP format...")
+        info("Converting images to WebP format...")
     else:
-        print("[Processor] Hashing image names...")
+        info("Hashing image names...")
 
     url_to_hashed = convert_media_files(url_file_pairs)
     if not url_to_hashed:
-        print("[Processor] Failed to convert media files. Exiting.")
+        error("Failed to convert media files.")
         return
 
-    print("[Processor] Successfully converted images")
-    print("[Processor] Preparing tweet data for export...")
+    info("Successfully converted/hashed media files.")
+    info("Preparing tweet data for export...")
     processed_tweets = prepare_tweets_data(filtered_tweets, url_to_hashed)
     if not processed_tweets:
-        print("[Processor] No tweets prepared for export. Exiting.")
+        error("No tweets prepared for export.")
         return
 
     # Merge new tweets with surviving existing tweets, deduplicating by id
@@ -199,12 +192,10 @@ def main() -> None:
     merged_tweets = new_tweets + existing_tweets
 
     with open(PROCESSED_JSON, "w", encoding="utf8") as f:
-        json.dump(merged_tweets, f)
+        json.dump(merged_tweets, f, indent=2)
 
-    print(
-        f"[Processor] Added {len(new_tweets)} new tweets, "
-        f"removed {removal_count} stale tweets "
-        f"({len(merged_tweets)} total)"
+    info(
+        f"Added {len(new_tweets)} new tweets, removed {removal_count} stale tweets ({len(merged_tweets)} total)"
     )
 
 
