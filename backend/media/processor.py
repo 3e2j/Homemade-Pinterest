@@ -1,7 +1,8 @@
 """Media processing orchestrator: download, clean, and transform tweets."""
 
 import json
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from backend.logger import error, info
 from backend.media.downloader import download_bulk_media, get_media_folder_dir
@@ -16,6 +17,7 @@ from backend.media.utils import (
 )
 from backend.settings import (
     AVATAR_DIR,
+    COMPATIBLE_WEBP_EXTS,
     LIKED_TWEETS_FILE,
     MAX_MEDIA_PER_TWEET,
     PROCESSED_JSON,
@@ -66,6 +68,40 @@ def _filter_existing_tweets(
         str(tweet.get("id")) for tweet in existing_tweets if tweet.get("id")
     }
     return [tweet for tweet in tweets if str(tweet.get("tweet_id")) not in existing_ids]
+
+
+def _summarize_media_counts(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, int]:
+    """Summarize media counts for processing."""
+    total = 0
+    images = 0
+    avatars = 0
+    videos = 0
+    webp_candidates = 0
+
+    for rel_filename in url_file_pairs.values():
+        if not rel_filename:
+            continue
+        total += 1
+        parts = str(rel_filename).split("/", 1)
+        folder = parts[0] if parts else ""
+        ext = Path(rel_filename).suffix.lower()
+
+        if folder == "videos":
+            videos += 1
+        else:
+            images += 1
+            if folder == "avatars":
+                avatars += 1
+            if WEBP_ENABLED and ext in COMPATIBLE_WEBP_EXTS:
+                webp_candidates += 1
+
+    return {
+        "total": total,
+        "images": images,
+        "avatars": avatars,
+        "videos": videos,
+        "webp_candidates": webp_candidates,
+    }
 
 
 def _get_referenced_paths(tweets: List[Dict[str, Any]]) -> set:
@@ -196,6 +232,18 @@ def main() -> None:
     if not url_file_pairs:
         error("Failed to download media files.")
         return
+
+    counts = _summarize_media_counts(url_file_pairs)
+    info(
+        "Processing media files: "
+        f"{counts['images']} images ({counts['avatars']} avatars), "
+        f"{counts['videos']} videos ({counts['total']} total)"
+    )
+    if WEBP_ENABLED:
+        info(
+            "WebP candidates: "
+            f"{counts['webp_candidates']}/{counts['images']} images"
+        )
 
     if WEBP_ENABLED:
         info("Converting images to WebP format...")

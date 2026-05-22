@@ -1,11 +1,14 @@
 """Transform raw tweets to processed format with media optimization."""
 
+import multiprocessing as mp
+import os
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from PIL import Image
 
-from backend.logger import error, warning
+from backend.logger import error, info, warning
 from backend.media.utils import (
     compute_file_hash,
     path_to_output_rel,
@@ -19,6 +22,10 @@ from backend.settings import (
     WEBP_METHOD,
     WEBP_QUALITY,
 )
+
+MAX_CONVERT_WORKERS = 8
+WORKERS_PER_CORE = 1
+MIN_CONVERT_WORKERS = 2
 
 
 def _get_hashed_path(filepath: Path) -> Optional[Path]:
@@ -52,7 +59,61 @@ def convert_to_webp(
         return filepath
 
 
-def convert_media_files(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, str]:
+def _process_media_item(url: str, rel_filename: str) -> Tuple[str, Optional[str], str]:
+    if not rel_filename:
+        warning("Missing rel_filename in url_file_pair")
+        return url, None, "skipped"
+
+    filepath = resolve_mapped_path(rel_filename)
+    if not filepath or not filepath.exists():
+        warning(f"Media filepath not found or inaccessible: {rel_filename}")
+        return url, None, "skipped"
+
+    hashed_path = _get_hashed_path(filepath)
+    if hashed_path is None:
+        warning(f"Could not compute hash for media: {filepath}")
+        return url, None, "skipped"
+
+    # Check if file can be converted to WebP
+    if WEBP_ENABLED and filepath.suffix.lower() in COMPATIBLE_WEBP_EXTS:
+        converted_path = convert_to_webp(filepath, hashed_path.with_suffix(".webp"))
+        hashed_filename = path_to_output_rel(converted_path)
+        status = "converted" if converted_path.suffix.lower() == ".webp" else "hashed"
+    else:
+        # Duplicate hash, use the one thats already on disk
+        if hashed_path.exists():
+            try:
+                filepath.unlink()
+            except Exception as e:
+                error(f"Failed to delete duplicate file {filepath}: {e}")
+        else:
+            try:
+                filepath.rename(hashed_path)
+            except Exception as e:
+                error(f"Failed to rename {filepath} to {hashed_path}: {e}")
+                return url, None, "skipped"
+        hashed_filename = path_to_output_rel(hashed_path)
+        status = "hashed"
+
+    if hashed_filename:
+        return url, hashed_filename, status
+
+    return url, None, "skipped"
+
+
+def _resolve_convert_workers(max_workers: Optional[int], task_count: int) -> int:
+    if max_workers is None:
+        cpu = os.cpu_count() or MIN_CONVERT_WORKERS
+        max_workers = min(
+            MAX_CONVERT_WORKERS, max(MIN_CONVERT_WORKERS, cpu * WORKERS_PER_CORE)
+        )
+    return max(1, min(max_workers, task_count))
+
+
+def convert_media_files(
+    url_file_pairs: Dict[str, Optional[str]],
+    max_workers: Optional[int] = None,
+) -> Dict[str, str]:
     """Convert media files and return mapping of URLs to hashed filenames.
 
     Takes url->filename mapping from downloader and:
@@ -64,46 +125,77 @@ def convert_media_files(url_file_pairs: Dict[str, Optional[str]]) -> Dict[str, s
         Input: {'https://example.com/pic.jpg': 'images/pic.jpg'}
         Output: {'https://example.com/pic.jpg': 'images/abc123def.webp'}
     """
-    url_to_hashed = {}
-
+    url_to_hashed: Dict[str, str] = {}
+    tasks = []
+    skipped = 0
     for url, rel_filename in url_file_pairs.items():
         if not rel_filename:
             warning("Missing rel_filename in url_file_pair")
+            skipped += 1
             continue
+        tasks.append((url, rel_filename))
 
-        filepath = resolve_mapped_path(rel_filename)
-        if not filepath or not filepath.exists():
-            warning(f"Media filepath not found or inaccessible: {rel_filename}")
-            continue
+    if not tasks:
+        if skipped:
+            info(f"Media processing complete: 0 webp, 0 hashed, {skipped} skipped")
+        return url_to_hashed
 
-        hashed_path = _get_hashed_path(filepath)
-        if hashed_path is None:
-            warning(f"Could not compute hash for media: {filepath}")
-            continue
+    worker_count = _resolve_convert_workers(max_workers, len(tasks))
+    if WEBP_ENABLED:
+        info(f"Converting media with {worker_count} worker(s)...")
 
-        # Check if file can be converted to WebP
-        if WEBP_ENABLED and filepath.suffix.lower() in COMPATIBLE_WEBP_EXTS:
-            converted_path = convert_to_webp(filepath, hashed_path.with_suffix(".webp"))
-            hashed_filename = path_to_output_rel(converted_path)
+    converted = 0
+    hashed = 0
 
-        else:
-            # Duplicate hash, use the one thats already on disk
-            if hashed_path.exists():
-                try:
-                    filepath.unlink()
-                except Exception as e:
-                    error(f"Failed to delete duplicate file {filepath}: {e}")
+    if worker_count == 1:
+        for url, rel_filename in tasks:
+            url, hashed_filename, status = _process_media_item(url, rel_filename)
+            if hashed_filename:
+                url_to_hashed[url] = hashed_filename
+            if status == "converted":
+                converted += 1
+            elif status == "hashed":
+                hashed += 1
             else:
+                skipped += 1
+    else:
+        if WEBP_ENABLED:
+            if os.name == "posix":
+                context = mp.get_context("fork")
+                executor = ProcessPoolExecutor(
+                    max_workers=worker_count, mp_context=context
+                )
+            else:
+                executor = ProcessPoolExecutor(max_workers=worker_count)
+        else:
+            executor = ThreadPoolExecutor(max_workers=worker_count)
+
+        with executor:
+            futures = {
+                executor.submit(_process_media_item, url, rel_filename): url
+                for url, rel_filename in tasks
+            }
+            for future in as_completed(futures):
                 try:
-                    filepath.rename(hashed_path)
+                    url, hashed_filename, status = future.result()
                 except Exception as e:
-                    error(f"Failed to rename {filepath} to {hashed_path}: {e}")
+                    error(f"Unexpected error converting media: {e}")
+                    skipped += 1
                     continue
-            hashed_filename = path_to_output_rel(hashed_path)
 
-        if hashed_filename:
-            url_to_hashed[url] = hashed_filename
+                if hashed_filename:
+                    url_to_hashed[url] = hashed_filename
+                if status == "converted":
+                    converted += 1
+                elif status == "hashed":
+                    hashed += 1
+                else:
+                    skipped += 1
 
+    info(
+        "Media processing complete: "
+        f"{converted} webp, {hashed} hashed, {skipped} skipped"
+    )
     return url_to_hashed
 
 
