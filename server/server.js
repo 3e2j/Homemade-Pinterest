@@ -5,7 +5,11 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { readFile, writeFile } from "fs/promises";
 import { dataEndpoint } from "./routes/data.js";
-import { refreshEndpoint, statusEndpoint } from "./routes/refresh.js";
+import {
+  refreshAllEndpoint,
+  refreshEndpoint,
+  statusEndpoint,
+} from "./routes/refresh.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -88,6 +92,7 @@ async function saveConfig(config) {
 // Routes (BEFORE static middleware)
 app.get("/data.json", dataEndpoint);
 app.post("/refresh", refreshEndpoint);
+app.post("/refresh-all", refreshAllEndpoint);
 app.get("/status", statusEndpoint);
 
 app.get("/config", async (req, res) => {

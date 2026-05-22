@@ -91,6 +91,17 @@ export async function downloadTweets() {
 }
 
 /**
+ * Download all tweets using Python backend (no consecutive limit)
+ */
+export async function downloadAllTweets() {
+  console.log("[Server] Starting full tweet download...");
+  return runPythonScript("backend/tweets/download_tweets.py", [
+    "--consecutive-limit",
+    "0",
+  ]);
+}
+
+/**
  * Process media using Python backend
  */
 export async function processMedia() {

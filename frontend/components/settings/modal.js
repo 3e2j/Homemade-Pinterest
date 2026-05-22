@@ -7,6 +7,7 @@ let config = {};
 let originalConfig = {};
 let hasChanges = false;
 let closeBtn = null;
+let refreshAllHandler = null;
 
 async function loadConfig() {
   try {
@@ -25,6 +26,10 @@ async function loadConfig() {
 
 export async function initSettings() {
   await loadConfig();
+}
+
+export function setRefreshAllHandler(handler) {
+  refreshAllHandler = handler;
 }
 
 export function setupSettingsButton() {
@@ -111,6 +116,15 @@ function createSection(title) {
   return section;
 }
 
+function createActionButton(label, onClick) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "settings-action-btn";
+  button.textContent = label;
+  button.addEventListener("click", onClick);
+  return button;
+}
+
 async function openSettingsModal() {
   await loadConfig();
   hasChanges = false;
@@ -175,6 +189,32 @@ async function openSettingsModal() {
     ),
   );
   content.appendChild(webpSection);
+
+  if (refreshAllHandler) {
+    const dataSection = createSection(t.settings.data.title);
+    const refreshAllButton = createActionButton(
+      t.settings.data.refreshAll,
+      async () => {
+        const originalText = refreshAllButton.textContent;
+        refreshAllButton.disabled = true;
+        refreshAllButton.textContent = t.refresh.refreshing;
+
+        try {
+          await refreshAllHandler();
+          refreshAllButton.textContent = t.refresh.updated;
+        } catch (e) {
+          refreshAllButton.textContent = t.refresh.error;
+        } finally {
+          setTimeout(() => {
+            refreshAllButton.textContent = originalText;
+            refreshAllButton.disabled = false;
+          }, 1500);
+        }
+      },
+    );
+    dataSection.appendChild(refreshAllButton);
+    content.appendChild(dataSection);
+  }
 
   closeBtn = document.createElement("button");
   closeBtn.textContent = t.buttons.close;

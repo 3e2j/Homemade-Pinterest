@@ -18,10 +18,14 @@ import {
   layoutMasonry,
 } from "./components/gallery/layout.js";
 import { setupLazyLoad } from "./interactions/scroll.js";
-import { setupRefreshButton } from "./interactions/refresh.js";
+import {
+  refreshAllTweets,
+  setupRefreshButton,
+} from "./interactions/refresh.js";
 import { refreshAndFetchData } from "./connectivity/refresh-utils.js";
 import {
   initSettings,
+  setRefreshAllHandler,
   setupSettingsButton,
 } from "./components/settings/modal.js";
 import { strings } from "./i18n/en.js";
@@ -135,6 +139,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize settings
   await initSettings();
+  setRefreshAllHandler(() => refreshAllTweets(insertTweets));
   setupSettingsButton();
 
   // Handle server shutdown on page close

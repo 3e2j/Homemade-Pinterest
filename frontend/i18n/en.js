@@ -21,6 +21,10 @@ export const strings = {
       title: "Server",
       closeOnPageClose: "Close server when closing page",
     },
+    data: {
+      title: "Data",
+      refreshAll: "Refresh All Likes",
+    },
     webp: {
       title: "WebP Conversion",
       enabled: "Enable WebP conversion",

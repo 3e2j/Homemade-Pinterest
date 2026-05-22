@@ -124,6 +124,22 @@ def _remove_tweets_and_orphaned_media(
     return surviving_tweets, len(removed_tweets)
 
 
+def _order_processed_tweets(
+    raw_tweets: List[Dict[str, Any]],
+    processed_by_id: Dict[str, Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Order processed tweets to match raw liked tweets order."""
+    ordered = []
+    for raw_tweet in raw_tweets:
+        tweet_id = raw_tweet.get("tweet_id")
+        if not tweet_id:
+            continue
+        processed = processed_by_id.get(str(tweet_id))
+        if processed:
+            ordered.append(processed)
+    return ordered
+
+
 def main() -> None:
     """Orchestrate media processing: download, cleanup, and transform."""
     raw_tweets = load_json_file(LIKED_TWEETS_FILE, [])
@@ -146,13 +162,25 @@ def main() -> None:
     existing_tweets, removal_count = _remove_tweets_and_orphaned_media(
         existing_tweets, tweets_with_media
     )
+    existing_by_id = {
+        str(tweet.get("id")): tweet for tweet in existing_tweets if tweet.get("id")
+    }
 
     filtered_tweets = _filter_existing_tweets(tweets_with_media, existing_tweets)
 
     if not filtered_tweets:
-        if removal_count:
-            save_json_file(PROCESSED_JSON, existing_tweets)
-            info("No new tweets to add. Saved updated data.json.")
+        ordered_existing = _order_processed_tweets(
+            tweets_with_media, existing_by_id
+        )
+        existing_order = [
+            str(tweet.get("id")) for tweet in existing_tweets if tweet.get("id")
+        ]
+        ordered_ids = [
+            str(tweet.get("id")) for tweet in ordered_existing if tweet.get("id")
+        ]
+        if removal_count or existing_order != ordered_ids:
+            save_json_file(PROCESSED_JSON, ordered_existing)
+            info("No new tweets to add. Synced data.json order.")
         else:
             info("All tweets already exist in data.json.")
         return
@@ -186,10 +214,14 @@ def main() -> None:
         error("No tweets prepared for export.")
         return
 
-    # Merge new tweets with surviving existing tweets, deduplicating by id
-    existing_ids = {tweet["id"] for tweet in existing_tweets}
-    new_tweets = [t for t in processed_tweets if t["id"] not in existing_ids]
-    merged_tweets = new_tweets + existing_tweets
+    # Merge new tweets with surviving existing tweets, preserving raw order
+    existing_ids = set(existing_by_id.keys())
+    new_tweets = [t for t in processed_tweets if str(t["id"]) not in existing_ids]
+    combined_by_id = {
+        **existing_by_id,
+        **{str(tweet["id"]): tweet for tweet in processed_tweets},
+    }
+    merged_tweets = _order_processed_tweets(tweets_with_media, combined_by_id)
 
     with open(PROCESSED_JSON, "w", encoding="utf8") as f:
         json.dump(merged_tweets, f, indent=2)

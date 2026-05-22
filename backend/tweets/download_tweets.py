@@ -1,5 +1,6 @@
 """Entry point for downloading tweets from X/Twitter likes."""
 
+import argparse
 from typing import Any, Dict, List, Set
 
 from backend.logger import error, info
@@ -36,6 +37,7 @@ class TweetDownloader:
 
         fetched_tweets: List[Dict[str, Any]] = []
         seen_streak = 0
+        disable_limit = consecutive_seen_limit is None or consecutive_seen_limit <= 0
         cursor = None
         old_cursor = None
         current_page = 1
@@ -60,13 +62,13 @@ class TweetDownloader:
                     continue
 
                 seen_streak += 1
-                if seen_streak >= consecutive_seen_limit:
+                if not disable_limit and seen_streak >= consecutive_seen_limit:
                     info(f"Hit {consecutive_seen_limit} consecutive known tweets. Stopping.")
                     break
 
                 fetched_tweets.append(tweet)
 
-            if seen_streak >= consecutive_seen_limit:
+            if not disable_limit and seen_streak >= consecutive_seen_limit:
                 break
 
             next_cursor = self.api_client.get_cursor(page)
@@ -119,11 +121,25 @@ class TweetDownloader:
         info(f"Total saved tweets: {len(deduped)}")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Download liked tweets from X/Twitter."
+    )
+    parser.add_argument(
+        "--consecutive-limit",
+        type=int,
+        default=DEFAULT_CONSECUTIVE_SEEN_LIMIT,
+        help="Stop after this many consecutive known tweets (0 disables the limit).",
+    )
+    return parser.parse_args()
+
+
 def main():
     try:
+        args = parse_args()
         downloader = TweetDownloader()
         info(f"Starting retrieval of likes for X user {downloader.api_client.x_user_id}...")
-        downloader.retrieve_all_likes()
+        downloader.retrieve_all_likes(args.consecutive_limit)
         info(f"Done. Likes JSON saved to: {LIKED_TWEETS_FILE}")
     except Exception as e:
         error(f"Failed to retrieve tweets: {e}")

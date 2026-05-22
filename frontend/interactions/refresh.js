@@ -118,3 +118,24 @@ export function setupRefreshButton(insertTweetsFunc) {
     }
   });
 }
+
+export async function refreshAllTweets(insertTweetsFunc) {
+  setStatus(STATUS.REFRESHING, t.status.downloadingTweets);
+
+  try {
+    const res = await fetch("/refresh-all", { method: "POST" });
+    await parseSSEStream(res, (data) =>
+      handleStatusMessage(data, { isInitial: false }),
+    );
+
+    await performRefresh(insertTweetsFunc, false);
+    setStatus(STATUS.IDLE);
+  } catch (e) {
+    console.error("Refresh all error:", e);
+    setStatus(STATUS.ERROR, t.status.error);
+    setTimeout(() => {
+      setStatus(STATUS.IDLE);
+    }, 2000);
+    throw e;
+  }
+}

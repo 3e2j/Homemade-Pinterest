@@ -297,6 +297,31 @@ a.info-link {
     padding: 8px 0;
 }
 
+.settings-action-btn {
+    width: 100%;
+    padding: 10px 16px;
+    background: #2a2a2a;
+    color: #fff;
+    border: 1px solid #444;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease;
+}
+
+.settings-action-btn:hover {
+    background: #333;
+    border-color: #555;
+}
+
+.settings-action-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
 #settings-modal input[type="checkbox"] {
     width: 18px;
     height: 18px;

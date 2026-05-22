@@ -1,6 +1,10 @@
-/** POST /refresh endpoint with SSE streaming. */
+/** Refresh endpoints with SSE streaming. */
 
-import { downloadTweets, processMedia } from "../utils/python-runner.js";
+import {
+  downloadAllTweets,
+  downloadTweets,
+  processMedia,
+} from "../utils/python-runner.js";
 import { STATUS } from "../constants/status.js";
 
 // Use a Promise-based lock to prevent concurrent refreshes
@@ -17,10 +21,11 @@ function sendSSEMessage(res, status, message) {
  * Handle refresh endpoint
  * Downloads tweets and processes media, streaming updates via SSE
  */
-export async function refreshEndpoint(req, res) {
+function startRefresh(res, { downloadAll = false } = {}) {
   // If refresh is already in progress, return 429 (Too Many Requests)
   if (refreshPromise) {
-    return res.status(429).json({ error: "Refresh already in progress" });
+    res.status(429).json({ error: "Refresh already in progress" });
+    return;
   }
 
   // Setup SSE response
@@ -33,7 +38,11 @@ export async function refreshEndpoint(req, res) {
     try {
       // Download tweets
       sendSSEMessage(res, STATUS.DOWNLOADING, "Downloading tweets...");
-      await downloadTweets();
+      if (downloadAll) {
+        await downloadAllTweets();
+      } else {
+        await downloadTweets();
+      }
 
       // Process media
       sendSSEMessage(res, STATUS.PROCESSING, "Processing media...");
@@ -51,6 +60,22 @@ export async function refreshEndpoint(req, res) {
       refreshPromise = null;
     }
   })();
+}
+
+/**
+ * Handle refresh endpoint
+ * Downloads tweets and processes media, streaming updates via SSE
+ */
+export async function refreshEndpoint(req, res) {
+  startRefresh(res, { downloadAll: false });
+}
+
+/**
+ * Handle refresh-all endpoint
+ * Downloads all tweets (no consecutive limit) and processes media
+ */
+export async function refreshAllEndpoint(req, res) {
+  startRefresh(res, { downloadAll: true });
 }
 
 /**
