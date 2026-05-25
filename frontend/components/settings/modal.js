@@ -9,6 +9,7 @@ let originalConfig = {};
 let hasChanges = false;
 let closeBtn = null;
 let refreshAllHandler = null;
+const HOLD_CONFIRM_MS = 1200;
 
 function normalizeConfig() {
   config.server = config.server || { closeOnPageClose: false };
@@ -153,6 +154,67 @@ function createActionButton(label, onClick) {
   return button;
 }
 
+function setupHoldToConfirm(button, onConfirm) {
+  let rafId = null;
+  let startTime = 0;
+  let holding = false;
+  let triggered = false;
+  let activePointerId = null;
+
+  const setProgress = (value) => {
+    button.style.setProperty("--hold-progress", `${value}%`);
+  };
+
+  const reset = () => {
+    holding = false;
+    startTime = 0;
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    if (!triggered) setProgress(0);
+  };
+
+  const tick = (time) => {
+    if (!holding) return;
+    if (!startTime) startTime = time;
+    const progress = Math.min((time - startTime) / HOLD_CONFIRM_MS, 1);
+    setProgress(progress * 100);
+    if (progress >= 1) {
+      holding = false;
+      triggered = true;
+      setProgress(100);
+      if (activePointerId !== null) {
+        button.releasePointerCapture?.(activePointerId);
+        activePointerId = null;
+      }
+      onConfirm();
+      return;
+    }
+    rafId = requestAnimationFrame(tick);
+  };
+
+  button.addEventListener("pointerdown", (e) => {
+    if (button.disabled) return;
+    triggered = false;
+    holding = true;
+    activePointerId = e.pointerId;
+    button.setPointerCapture?.(e.pointerId);
+    rafId = requestAnimationFrame(tick);
+  });
+
+  const cancel = (e) => {
+    if (!holding) return;
+    if (activePointerId !== null) {
+      button.releasePointerCapture?.(activePointerId);
+      activePointerId = null;
+    }
+    reset();
+  };
+
+  button.addEventListener("pointerup", cancel);
+  button.addEventListener("pointerleave", cancel);
+  button.addEventListener("pointercancel", cancel);
+}
+
 async function openSettingsModal() {
   await loadConfig();
   hasChanges = false;
@@ -246,24 +308,28 @@ async function openSettingsModal() {
     const dataSection = createSection(t.settings.data.title);
     const refreshAllButton = createActionButton(
       t.settings.data.refreshAll,
-      async () => {
-        const originalText = refreshAllButton.textContent;
-        refreshAllButton.disabled = true;
-        refreshAllButton.textContent = t.refresh.refreshing;
-
-        try {
-          await refreshAllHandler();
-          refreshAllButton.textContent = t.refresh.updated;
-        } catch (e) {
-          refreshAllButton.textContent = t.refresh.error;
-        } finally {
-          setTimeout(() => {
-            refreshAllButton.textContent = originalText;
-            refreshAllButton.disabled = false;
-          }, 1500);
-        }
-      },
+      () => {},
     );
+    refreshAllButton.classList.add("hold-confirm");
+    refreshAllButton.style.setProperty("--hold-progress", "0%");
+    setupHoldToConfirm(refreshAllButton, async () => {
+      const originalText = refreshAllButton.textContent;
+      refreshAllButton.disabled = true;
+      refreshAllButton.textContent = t.refresh.refreshing;
+
+      try {
+        await refreshAllHandler();
+        refreshAllButton.textContent = t.refresh.updated;
+      } catch (e) {
+        refreshAllButton.textContent = t.refresh.error;
+      } finally {
+        setTimeout(() => {
+          refreshAllButton.textContent = originalText;
+          refreshAllButton.disabled = false;
+          refreshAllButton.style.setProperty("--hold-progress", "0%");
+        }, 1500);
+      }
+    });
     dataSection.appendChild(refreshAllButton);
     content.appendChild(dataSection);
   }

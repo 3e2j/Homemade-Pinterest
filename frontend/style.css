@@ -334,9 +334,32 @@ a.info-link {
         border-color 0.2s ease;
 }
 
+.settings-action-btn.hold-confirm {
+    --hold-progress: 0%;
+    background: linear-gradient(
+        90deg,
+        rgba(220, 53, 69, 0.85) 0%,
+        rgba(220, 53, 69, 0.85) var(--hold-progress),
+        #2a2a2a var(--hold-progress),
+        #2a2a2a 100%
+    );
+    position: relative;
+    overflow: hidden;
+}
+
 .settings-action-btn:hover {
     background: #333;
     border-color: #555;
+}
+
+.settings-action-btn.hold-confirm:hover {
+    background: linear-gradient(
+        90deg,
+        rgba(220, 53, 69, 0.95) 0%,
+        rgba(220, 53, 69, 0.95) var(--hold-progress),
+        #333 var(--hold-progress),
+        #333 100%
+    );
 }
 
 .settings-action-btn:disabled {
