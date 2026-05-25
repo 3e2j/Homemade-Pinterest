@@ -42,13 +42,11 @@ if command -v lsof &> /dev/null; then
     if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
         echo "Port 8000 already in use. Stopping existing server..."
         kill $(lsof -t -i:8000) 2>/dev/null
-        sleep 1
     fi
 elif command -v netstat &> /dev/null; then
     if netstat -tuln 2>/dev/null | grep -q ":8000 "; then
-        echo "Port 8000 already in use. Stopping existing server..."
-        pkill -f "node server.js" 2>/dev/null || true
-        sleep 1
+        echo "Port 8000 already in use. Please stop it manually."
+        exit 1
     fi
 fi
 
@@ -59,16 +57,6 @@ cd server
 npm start &
 SERVER_PID=$!
 cd ..
-
-# Wait for server to start
-# TODO: Change to get a confirm message instead of this
-sleep 0.5
-
-# Verify server is running
-if ! kill -0 $SERVER_PID 2>/dev/null; then
-    echo "❌ Failed to start server"
-    exit 1
-fi
 
 # Open browser (cross-platform)
 echo "Opening browser..."

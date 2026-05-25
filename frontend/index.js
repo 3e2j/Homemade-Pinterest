@@ -33,6 +33,18 @@ import { strings } from "./i18n/en.js";
 const t = strings;
 
 let statusUnsubscribe = null;
+const CLIENT_HEARTBEAT_MS = 5000;
+
+function setupClientHeartbeat() {
+  const heartbeat = () => {
+    fetch("/client/heartbeat", { method: "POST", keepalive: true }).catch(
+      () => {},
+    );
+  };
+
+  heartbeat();
+  setInterval(heartbeat, CLIENT_HEARTBEAT_MS);
+}
 
 export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
   if (!tweetsToInsert || !tweetsToInsert.length) return [];
@@ -142,20 +154,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   setRefreshAllHandler(() => refreshAllTweets(insertTweets));
   setupSettingsButton();
 
-  // Handle server shutdown on page close
-  window.addEventListener("beforeunload", async (e) => {
-    if (statusUnsubscribe) statusUnsubscribe();
-
-    try {
-      const configRes = await fetch("/config");
-      const config = await configRes.json();
-      if (config.server?.closeOnPageClose) {
-        await fetch("/shutdown", { method: "POST" });
-      }
-    } catch (err) {
-      console.warn("Could not check shutdown setting:", err);
-    }
-  });
+  setupClientHeartbeat();
 
   setStatus(STATUS.LOADING_INITIAL, t.status.loadingInitial);
 

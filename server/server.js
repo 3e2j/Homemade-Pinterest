@@ -14,6 +14,12 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = 8000;
+const CLIENT_TTL_MS = 10000;
+const CLIENT_SWEEP_MS = 2000;
+
+let server = null;
+let closeOnPageClose = false;
+let lastClientSeen = null;
 
 // Directory paths
 const frontendDir = join(__dirname, "../frontend");
@@ -89,14 +95,27 @@ async function saveConfig(config) {
   }
 }
 
+loadConfig()
+  .then((config) => {
+    closeOnPageClose = config?.server?.closeOnPageClose === true;
+  })
+  .catch((e) => {
+    console.warn("Failed to load config:", e.message);
+  });
+
 // Routes (BEFORE static middleware)
 app.get("/data.json", dataEndpoint);
 app.post("/refresh", refreshEndpoint);
 app.post("/refresh-all", refreshAllEndpoint);
 app.get("/status", statusEndpoint);
+app.post("/client/heartbeat", (req, res) => {
+  lastClientSeen = Date.now();
+  res.json({ ok: true });
+});
 
 app.get("/config", async (req, res) => {
   const config = await loadConfig();
+  closeOnPageClose = config?.server?.closeOnPageClose === true;
   res.json(config);
 });
 
@@ -127,6 +146,7 @@ app.post("/config", async (req, res) => {
     return res.status(500).json({ error: "Failed to save config" });
   }
 
+  closeOnPageClose = config?.server?.closeOnPageClose === true;
   res.json(config);
 });
 
@@ -148,10 +168,18 @@ app.use((req, res) => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+server = app.listen(PORT, () => {
   console.log(`[Server] Listening at http://localhost:${PORT}`);
   console.log("[Server] Press Ctrl+C to stop");
 });
+
+setInterval(() => {
+  if (!server || !closeOnPageClose || lastClientSeen === null) return;
+  if (Date.now() - lastClientSeen > CLIENT_TTL_MS) {
+    console.log("[Server] No active clients, shutting down...");
+    server.close(() => process.exit(0));
+  }
+}, CLIENT_SWEEP_MS);
 
 // Graceful shutdown
 process.on("SIGINT", () => {
