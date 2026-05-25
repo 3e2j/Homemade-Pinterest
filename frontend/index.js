@@ -184,7 +184,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   setupResizeListener();
-  setupLazyLoad(loadMoreTweets);
   setupRefreshButton(insertTweets);
 
   if (tweets.length > 0) {
@@ -192,6 +191,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     await insertTweets(initialSlice, { prepend: false });
     setLoadedCount(initialSlice.length);
   }
+
+  setupLazyLoad(loadMoreTweets);
 
   setStatus(STATUS.IDLE);
 });
