@@ -1,6 +1,7 @@
 /** Settings modal UI with deferred config save. */
 
 import { strings } from "../../i18n/en.js";
+import { layoutMasonry } from "../gallery/layout.js";
 
 const t = strings;
 let config = {};
@@ -9,19 +10,46 @@ let hasChanges = false;
 let closeBtn = null;
 let refreshAllHandler = null;
 
+function normalizeConfig() {
+  config.server = config.server || { closeOnPageClose: false };
+  config.webp_conversion = config.webp_conversion || {
+    enabled: true,
+    quality: 80,
+    method: 6,
+  };
+  config.ui = {
+    compact: false,
+    edgeMedia: false,
+    ...(config.ui || {}),
+  };
+}
+
+function refreshLayout() {
+  const grid = document.getElementById("grid");
+  if (!grid) return;
+  requestAnimationFrame(() => {
+    layoutMasonry(grid);
+  });
+}
+
+function applyUiSettings() {
+  if (!document.body) return;
+  document.body.classList.toggle("compact-mode", !!config.ui?.compact);
+  document.body.classList.toggle("edge-media", !!config.ui?.edgeMedia);
+  refreshLayout();
+}
+
 async function loadConfig() {
   try {
     const res = await fetch("/config");
     config = await res.json();
-    originalConfig = JSON.parse(JSON.stringify(config));
   } catch (e) {
     console.warn("Failed to load config:", e);
-    config = {
-      server: { closeOnPageClose: false },
-      webp_conversion: { enabled: true, quality: 80, method: 6 },
-    };
-    originalConfig = JSON.parse(JSON.stringify(config));
+    config = {};
   }
+  normalizeConfig();
+  originalConfig = JSON.parse(JSON.stringify(config));
+  applyUiSettings();
 }
 
 export async function initSettings() {
@@ -190,6 +218,30 @@ async function openSettingsModal() {
   );
   content.appendChild(webpSection);
 
+  // Display settings section
+  const displaySection = createSection(t.settings.display.title);
+  displaySection.appendChild(
+    createCheckboxSetting(
+      t.settings.display.compact,
+      () => config.ui?.compact,
+      (value) => {
+        config.ui = config.ui || {};
+        config.ui.compact = value;
+      },
+    ),
+  );
+  displaySection.appendChild(
+    createCheckboxSetting(
+      t.settings.display.edgeMedia,
+      () => config.ui?.edgeMedia,
+      (value) => {
+        config.ui = config.ui || {};
+        config.ui.edgeMedia = value;
+      },
+    ),
+  );
+  content.appendChild(displaySection);
+
   if (refreshAllHandler) {
     const dataSection = createSection(t.settings.data.title);
     const refreshAllButton = createActionButton(
@@ -245,6 +297,7 @@ async function saveConfig() {
     });
     originalConfig = JSON.parse(JSON.stringify(config));
     hasChanges = false;
+    applyUiSettings();
   } catch (err) {
     console.error("Failed to save config:", err);
   }

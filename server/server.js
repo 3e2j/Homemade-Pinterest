@@ -63,6 +63,16 @@ function validateConfig(config) {
     }
   }
 
+  if (config.ui) {
+    if (typeof config.ui !== "object") return false;
+    if ("compact" in config.ui && typeof config.ui.compact !== "boolean") {
+      return false;
+    }
+    if ("edgeMedia" in config.ui && typeof config.ui.edgeMedia !== "boolean") {
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -139,6 +149,13 @@ app.post("/config", async (req, res) => {
       return res.status(400).json({ error: "webp_conversion must be an object" });
     }
     config.webp_conversion = { ...config.webp_conversion, ...updates.webp_conversion };
+  }
+
+  if (updates.ui) {
+    if (typeof updates.ui !== "object") {
+      return res.status(400).json({ error: "ui must be an object" });
+    }
+    config.ui = { ...config.ui, ...updates.ui };
   }
 
   const saved = await saveConfig(config);

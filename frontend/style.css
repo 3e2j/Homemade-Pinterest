@@ -81,6 +81,28 @@ a.info-link {
     white-space: pre-wrap;
 }
 
+.compact-mode .content {
+    display: none;
+}
+
+.edge-media .card {
+    padding-bottom: 0;
+}
+
+.edge-media .card > .media-wrap,
+.edge-media .media-grid {
+    margin: 0;
+}
+
+.edge-media .card > .media-wrap img,
+.edge-media .media-grid img,
+.edge-media .card > .media-wrap video,
+.edge-media .media-grid video,
+.edge-media .card > .media-wrap .media-content,
+.edge-media .media-grid .media-content {
+    border-radius: 0;
+}
+
 /* === Media === */
 .card > .media-wrap,
 .media-grid {

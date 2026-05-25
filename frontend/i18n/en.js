@@ -21,6 +21,11 @@ export const strings = {
       title: "Server",
       closeOnPageClose: "Close server when closing page",
     },
+    display: {
+      title: "Display",
+      compact: "Compact mode (hide tweet text)",
+      edgeMedia: "Edge-to-edge media (remove inner borders)",
+    },
     data: {
       title: "Data",
       refreshAll: "Refresh All Likes",

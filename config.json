@@ -6,5 +6,9 @@
   },
   "server": {
     "closeOnPageClose": true
+  },
+  "ui": {
+    "compact": false,
+    "edgeMedia": false
   }
 }
