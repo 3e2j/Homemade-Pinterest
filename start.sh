@@ -3,14 +3,22 @@ set -e
 
 cd "$(dirname "$0")"
 
+SERVER_URL="http://localhost:8000/status"
+STARTUP_TIMEOUT_SECS=10
+
 # Check for required tools
 if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is required but not installed."
+    echo "Python 3 is required but not installed."
     exit 1
 fi
 
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is required but not installed."
+    echo "Node.js is required but not installed."
+    exit 1
+fi
+
+if ! command -v curl &> /dev/null; then
+    echo "curl is required but not installed."
     exit 1
 fi
 
@@ -23,7 +31,7 @@ if [ ! -d ".venv" ]; then
     python3 -m venv .venv
     source .venv/bin/activate
     pip install -q -r requirements.txt
-    echo "✓ Python setup complete"
+    echo "Python setup complete"
 else
     source .venv/bin/activate
 fi
@@ -34,7 +42,7 @@ if [ ! -d "server/node_modules" ]; then
     cd server
     npm install -q
     cd ..
-    echo "✓ Node.js setup complete"
+    echo "Node.js setup complete"
 fi
 
 # Check if port 8000 is already in use and kill it
@@ -57,6 +65,19 @@ cd server
 npm start &
 SERVER_PID=$!
 cd ..
+
+# Wait for server to be ready
+echo "Waiting for server..."
+if ! curl --silent --fail --max-time 1 \
+    --retry 200 \
+    --retry-connrefused \
+    --retry-all-errors \
+    --retry-delay 0 \
+    --retry-max-time "${STARTUP_TIMEOUT_SECS}" \
+    "$SERVER_URL" >/dev/null 2>&1; then
+    echo "Server did not become ready in time"
+    exit 1
+fi
 
 # Open browser (cross-platform)
 echo "Opening browser..."
