@@ -18,6 +18,7 @@ import {
   layoutMasonry,
 } from "./components/gallery/layout.js";
 import { setupLazyLoad } from "./interactions/scroll.js";
+import { observeCardForRecycling } from "./interactions/media-recycle.js";
 import {
   refreshAllTweets,
   setupRefreshButton,
@@ -81,6 +82,7 @@ export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
       layoutMasonry(grid, { reset: prepend });
       cards.forEach((card) => {
         card.style.visibility = "visible";
+        observeCardForRecycling(card);
       });
     });
   };
