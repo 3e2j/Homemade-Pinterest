@@ -76,7 +76,9 @@ export async function insertTweets(tweetsToInsert, { prepend = false } = {}) {
   const reveal = async () => {
     await waitForMediaLoad(cards);
     requestAnimationFrame(() => {
-      layoutMasonry(grid);
+      // Prepending changes DOM order for every existing card, so the
+      // masonry packing has to be recomputed from scratch in that case.
+      layoutMasonry(grid, { reset: prepend });
       cards.forEach((card) => {
         card.style.visibility = "visible";
       });

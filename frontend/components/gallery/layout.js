@@ -2,21 +2,19 @@
 
 import { CARD_WIDTH, COLUMN_GUTTER } from "../../store/store.js";
 
-export function layoutMasonry(container) {
-  if (!container) return;
+const PADDING = 8; // matches #grid padding in CSS
+const MIN_COLUMNS = 2;
 
-  const gutter = COLUMN_GUTTER;
-  const padding = 8; // matches #grid padding in CSS
-  const minColumns = 2;
+// Cached state from the last layout pass, so appending a new batch only
+// positions the newly added cards instead of re-measuring everything.
+let layoutState = null;
 
-  const containerWidth = container.clientWidth;
-  const innerWidth = Math.max(0, containerWidth - padding * 2);
+function computeColumns(containerWidth) {
+  const innerWidth = Math.max(0, containerWidth - PADDING * 2);
 
-  // Find max columns that can fit without overflow
-  let columns = minColumns;
-  for (let c = minColumns; c <= Math.floor(innerWidth / CARD_WIDTH); c++) {
-    // Check if c columns fit: c cards + (c-1) gutters
-    const requiredWidth = c * CARD_WIDTH + (c - 1) * gutter;
+  let columns = MIN_COLUMNS;
+  for (let c = MIN_COLUMNS; c <= Math.floor(innerWidth / CARD_WIDTH); c++) {
+    const requiredWidth = c * CARD_WIDTH + (c - 1) * COLUMN_GUTTER;
     if (requiredWidth <= innerWidth) {
       columns = c;
     } else {
@@ -24,46 +22,85 @@ export function layoutMasonry(container) {
     }
   }
 
-  // Scale card width to fill available space without gaps
-  const totalGutterWidth = gutter * (columns - 1);
+  const totalGutterWidth = COLUMN_GUTTER * (columns - 1);
   const dynamicCardWidth = (innerWidth - totalGutterWidth) / columns;
 
-  const heights = new Array(columns).fill(0);
+  return { columns, dynamicCardWidth };
+}
+
+export function layoutMasonry(container, { reset = false } = {}) {
+  if (!container) return;
+
+  const containerWidth = container.clientWidth;
+  const { columns, dynamicCardWidth } = computeColumns(containerWidth);
   const cards = Array.from(container.children);
 
-  for (const card of cards) {
-    const span = card.classList.contains("multiple-media")
-      ? Math.min(2, columns)
-      : 1;
-    const width = dynamicCardWidth * span + gutter * (span - 1);
+  const needsFullRelayout =
+    reset ||
+    !layoutState ||
+    layoutState.columns !== columns ||
+    layoutState.containerWidth !== containerWidth ||
+    cards.length < layoutState.positionedCount;
 
-    let minY = Infinity;
-    let minX = 0;
-    for (let i = 0; i <= columns - span; i++) {
-      const sliceHeight = Math.max(...heights.slice(i, i + span));
-      if (sliceHeight < minY) {
-        minY = sliceHeight;
-        minX = i;
+  const startIndex = needsFullRelayout ? 0 : layoutState.positionedCount;
+  const heights = needsFullRelayout
+    ? new Array(columns).fill(0)
+    : layoutState.heights;
+
+  const newCards = cards.slice(startIndex);
+
+  if (newCards.length) {
+    // Phase 1: writes only. Widths must land before we measure heights.
+    const spans = newCards.map((card) =>
+      card.classList.contains("multiple-media") ? Math.min(2, columns) : 1,
+    );
+    newCards.forEach((card, i) => {
+      const span = spans[i];
+      const width = dynamicCardWidth * span + COLUMN_GUTTER * (span - 1);
+      card.style.position = "absolute";
+      card.style.width = `${width}px`;
+    });
+
+    // Phase 2: reads only. One forced reflow for the whole batch instead
+    // of one per card.
+    const cardHeights = newCards.map((card) => card.offsetHeight);
+
+    // Phase 3: writes only, driven purely by in-memory numbers.
+    newCards.forEach((card, i) => {
+      const span = spans[i];
+      let minY = Infinity;
+      let minX = 0;
+      for (let c = 0; c <= columns - span; c++) {
+        const sliceHeight = Math.max(...heights.slice(c, c + span));
+        if (sliceHeight < minY) {
+          minY = sliceHeight;
+          minX = c;
+        }
       }
-    }
 
-    const x = padding + minX * (dynamicCardWidth + gutter);
-    card.style.position = "absolute";
-    card.style.width = `${width}px`;
-    card.style.transform = `translate(${x}px, ${minY}px)`;
+      const x = PADDING + minX * (dynamicCardWidth + COLUMN_GUTTER);
+      card.style.transform = `translate(${x}px, ${minY}px)`;
 
-    const newHeight = minY + card.offsetHeight + gutter;
-    for (let i = 0; i < span; i++) {
-      heights[minX + i] = newHeight;
-    }
+      const newHeight = minY + cardHeights[i] + COLUMN_GUTTER;
+      for (let c = 0; c < span; c++) {
+        heights[minX + c] = newHeight;
+      }
+    });
   }
 
   container.style.height = `${Math.max(...heights)}px`;
+
+  layoutState = {
+    containerWidth,
+    columns,
+    heights,
+    positionedCount: cards.length,
+  };
 }
 
 export function setupResizeListener() {
   window.addEventListener("resize", () => {
     const grid = document.getElementById("grid");
-    if (grid) layoutMasonry(grid);
+    if (grid) layoutMasonry(grid, { reset: true });
   });
 }

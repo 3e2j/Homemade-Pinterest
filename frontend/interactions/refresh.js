@@ -72,7 +72,7 @@ async function performRefresh(insertTweetsFunc, isBroadcast = false) {
     if (newOnes.length) {
       await prependNewTweets(newOnes, insertTweetsFunc);
     } else if (removedIds.length) {
-      layoutMasonry(getGrid());
+      layoutMasonry(getGrid(), { reset: true });
     }
 
     const grid = getGrid();

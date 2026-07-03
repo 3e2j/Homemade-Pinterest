@@ -29,7 +29,7 @@ function refreshLayout() {
   const grid = document.getElementById("grid");
   if (!grid) return;
   requestAnimationFrame(() => {
-    layoutMasonry(grid);
+    layoutMasonry(grid, { reset: true });
   });
 }
 
